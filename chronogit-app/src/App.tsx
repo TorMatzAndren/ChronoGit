@@ -161,6 +161,10 @@ function Timeline({ refreshTick }: { refreshTick: number }) {
       const result = await invoke<HistoryCommit[]>("git_history", { repoPath });
       setHistory(result);
       setError("");
+
+      if (result.length > 0) {
+        await selectSnapshot(result[0]);
+      }
     } catch (err) {
       setError(`History failed: ${err}`);
     }
