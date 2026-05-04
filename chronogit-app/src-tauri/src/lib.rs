@@ -396,10 +396,13 @@ fn git_history(repo_path: String) -> Result<Vec<HistoryCommit>, String> {
 
 #[tauri::command]
 fn git_changed_files_from_commit(repo_path: String, commit_hash: String) -> Result<Vec<ChangedFile>, String> {
+    let range = format!("{}^!", commit_hash);
+
     let out = Command::new("git")
         .arg("-C")
         .arg(&repo_path)
-        .args(["diff", "--name-status", &commit_hash, "HEAD"])
+        .args(["diff-tree", "--no-commit-id", "--name-status", "-r"])
+        .arg(&range)
         .output()
         .map_err(|e| e.to_string())?;
 
@@ -425,10 +428,14 @@ fn git_changed_files_from_commit(repo_path: String, commit_hash: String) -> Resu
 
 #[tauri::command]
 fn git_diff_file_from_commit(repo_path: String, commit_hash: String, path: String) -> Result<DiffResult, String> {
+    let range = format!("{}^!", commit_hash);
+
     let out = Command::new("git")
         .arg("-C")
         .arg(&repo_path)
-        .args(["diff", &commit_hash, "HEAD", "--"])
+        .args(["show", "--format=", "--find-renames", "--find-copies"])
+        .arg(&range)
+        .arg("--")
         .arg(&path)
         .output()
         .map_err(|e| e.to_string())?;

@@ -148,6 +148,35 @@ function explainEntry(change: FileChange) {
   return ["Review this Git change before preparing or committing it."];
 }
 
+
+
+function diffLineClass(line: string): string {
+  if (line.startsWith("+++") || line.startsWith("---")) return "diff-line diff-line--file";
+  if (line.startsWith("@@")) return "diff-line diff-line--hunk";
+  if (line.startsWith("+")) return "diff-line diff-line--add";
+  if (line.startsWith("-")) return "diff-line diff-line--remove";
+  if (line.startsWith("diff --git")) return "diff-line diff-line--header";
+  return "diff-line";
+}
+
+function renderPrettyDiff(diff: string) {
+  if (!diff || !diff.trim()) {
+    return <div className="diff-placeholder">No diff for this file.</div>;
+  }
+
+  return (
+    <div className="diff-pretty">
+      {diff.split("\\n").map((line, i) => (
+        <div className={diffLineClass(line)} key={i}>
+          <span className="diff-line__num">{i + 1}</span>
+          <span className="diff-line__text">{line || " "}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+
 function Timeline({ refreshTick }: { refreshTick: number }) {
   const [history, setHistory] = useState<HistoryCommit[]>([]);
   const [selected, setSelected] = useState<HistoryCommit | null>(null);
@@ -238,7 +267,7 @@ function Timeline({ refreshTick }: { refreshTick: number }) {
       <div className="timeline-header">
         <div>
           <h2>Time Machine</h2>
-          <p>Pick a snapshot, then pick a file to view a file-level diff against current HEAD.</p>
+          <p>Pick a snapshot, then pick a file to view what changed in that snapshot.</p>
         </div>
         <button onClick={loadHistory}>Refresh history</button>
       </div>
@@ -262,7 +291,7 @@ function Timeline({ refreshTick }: { refreshTick: number }) {
 
         <div className="timeline-files">
           <div className="diff-title">
-            {selected ? `Changed files: ${selected.short_hash} → HEAD` : "Changed files"}
+            {selected ? `Changed files in snapshot ${selected.short_hash}` : "Changed files"}
           </div>
 
           {selected ? (
@@ -278,7 +307,7 @@ function Timeline({ refreshTick }: { refreshTick: number }) {
                 </button>
               ))
             ) : (
-              <div className="timeline-empty">No file differences between this snapshot and HEAD.</div>
+              <div className="timeline-empty">No file changes recorded in this snapshot.</div>
             )
           ) : (
             <div className="timeline-empty">Select a snapshot first.</div>
@@ -298,7 +327,9 @@ function Timeline({ refreshTick }: { refreshTick: number }) {
             </div>
           ) : null}
 
-          <pre>{selected ? diff : "Select a snapshot to inspect changed files."}</pre>
+          <div className="diff-pretty">
+            {selected ? (() => { try { return renderPrettyDiff(diff); } catch (e) { return <pre>{diff}</pre>; } })() : <div className="diff-placeholder">Select a snapshot to inspect changed files.</div>}
+          </div>
         </div>
       </div>
     </section>
