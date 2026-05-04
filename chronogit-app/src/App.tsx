@@ -24,6 +24,24 @@ type CommitResult = {
   commit_hash: string;
 };
 
+type HistoryCommit = {
+  hash: string;
+  short_hash: string;
+  author: string;
+  timestamp: string;
+  message: string;
+};
+
+type ChangedFile = {
+  path: string;
+  status: string;
+};
+
+type DiffResult = {
+  commit_hash: string;
+  diff: string;
+};
+
 const repoPath = "/home/dretski/projects/ChronoGit";
 
 function group(changes: FileChange[]) {
@@ -128,6 +146,159 @@ function explainEntry(change: FileChange) {
   }
 
   return ["Review this Git change before preparing or committing it."];
+}
+
+function Timeline() {
+  const [history, setHistory] = useState<HistoryCommit[]>([]);
+  const [selected, setSelected] = useState<HistoryCommit | null>(null);
+  const [changedFiles, setChangedFiles] = useState<ChangedFile[]>([]);
+  const [selectedFile, setSelectedFile] = useState<ChangedFile | null>(null);
+  const [diff, setDiff] = useState("");
+  const [error, setError] = useState("");
+
+  async function loadHistory() {
+    try {
+      const result = await invoke<HistoryCommit[]>("git_history", { repoPath });
+      setHistory(result);
+      setError("");
+    } catch (err) {
+      setError(`History failed: ${err}`);
+    }
+  }
+
+  async function selectSnapshot(commit: HistoryCommit) {
+    try {
+      setSelected(commit);
+      setSelectedFile(null);
+      setDiff("Select a changed file to view its diff.");
+      const files = await invoke<ChangedFile[]>("git_changed_files_from_commit", {
+        repoPath,
+        commitHash: commit.hash,
+      });
+      setChangedFiles(files);
+      setError("");
+    } catch (err) {
+      setChangedFiles([]);
+      setDiff("");
+      setError(`Changed-file list failed: ${err}`);
+    }
+  }
+
+  async function selectFile(file: ChangedFile) {
+    if (!selected) return;
+
+    try {
+      setSelectedFile(file);
+      setDiff("Loading file diff...");
+      const result = await invoke<DiffResult>("git_diff_file_from_commit", {
+        repoPath,
+        commitHash: selected.hash,
+        path: file.path,
+      });
+      setDiff(result.diff.trim() || "No diff for this file.");
+      setError("");
+    } catch (err) {
+      setDiff("");
+      setError(`File diff failed: ${err}`);
+    }
+  }
+
+  async function restoreSelectedFile() {
+    if (!selected || !selectedFile) return;
+
+    const ok = confirm(
+      `DANGER: Restore file from old snapshot?\n\nFile:\n${selectedFile.path}\n\nSnapshot:\n${selected.short_hash} — ${selected.message}\n\nThis will modify your working folder. It will NOT commit automatically. Continue?`
+    );
+
+    if (!ok) return;
+
+    try {
+      const result = await invoke<string>("git_restore_file_from_commit", {
+        repoPath,
+        commitHash: selected.hash,
+        path: selectedFile.path,
+      });
+      setError("");
+      setDiff(`${result}\n\nThe file has been restored into your working folder. Review it before preparing or committing.`);
+    } catch (err) {
+      setError(`Restore from snapshot failed: ${err}`);
+    }
+  }
+
+  useEffect(() => {
+    loadHistory();
+  }, []);
+
+  return (
+    <section className="timeline-panel">
+      <div className="timeline-header">
+        <div>
+          <h2>Time Machine</h2>
+          <p>Pick a snapshot, then pick a file to view a file-level diff against current HEAD.</p>
+        </div>
+        <button onClick={loadHistory}>Refresh history</button>
+      </div>
+
+      {error ? <div className="message">{error}</div> : null}
+
+      <div className="timeline-layout timeline-layout--three">
+        <div className="timeline-list">
+          {history.map((commit) => (
+            <button
+              key={commit.hash}
+              className={`timeline-commit ${selected?.hash === commit.hash ? "timeline-commit--selected" : ""}`}
+              onClick={() => selectSnapshot(commit)}
+            >
+              <span className="timeline-hash">{commit.short_hash}</span>
+              <span className="timeline-message">{commit.message}</span>
+              <span className="timeline-meta">{commit.author} · {commit.timestamp}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="timeline-files">
+          <div className="diff-title">
+            {selected ? `Changed files: ${selected.short_hash} → HEAD` : "Changed files"}
+          </div>
+
+          {selected ? (
+            changedFiles.length ? (
+              changedFiles.map((file) => (
+                <button
+                  key={`${file.status}-${file.path}`}
+                  className={`timeline-file ${selectedFile?.path === file.path ? "timeline-file--selected" : ""}`}
+                  onClick={() => selectFile(file)}
+                >
+                  <span>{file.status}</span>
+                  <strong>{file.path}</strong>
+                </button>
+              ))
+            ) : (
+              <div className="timeline-empty">No file differences between this snapshot and HEAD.</div>
+            )
+          ) : (
+            <div className="timeline-empty">Select a snapshot first.</div>
+          )}
+        </div>
+
+        <div className="diff-viewer">
+          <div className="diff-title">
+            {selectedFile ? `File diff: ${selectedFile.path}` : "No file selected"}
+          </div>
+
+          {selectedFile ? (
+            <div className="diff-actions">
+              <button className="danger-button" onClick={restoreSelectedFile}>
+                Restore this file from selected snapshot
+              </button>
+            </div>
+          ) : null}
+
+          <pre>{selected ? diff : "Select a snapshot to inspect changed files."}</pre>
+        </div>
+      </div>
+    </section>
+  );
 }
 
 export default function App() {
@@ -354,6 +525,8 @@ export default function App() {
           {data.working.length ? renderGrouped(data.working) : <div className="empty">Working folder is clean.</div>}
         </div>
       </section>
+
+      <Timeline />
 
       {showPreflight ? (
         <div className="preflight-overlay">

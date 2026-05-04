@@ -26,6 +26,28 @@ struct CommitResult {
     commit_hash: String,
 }
 
+#[derive(Serialize)]
+struct HistoryCommit {
+    hash: String,
+    short_hash: String,
+    author: String,
+    timestamp: String,
+    message: String,
+}
+
+#[derive(Serialize)]
+struct ChangedFile {
+    path: String,
+    status: String,
+}
+
+#[derive(Serialize)]
+struct DiffResult {
+    commit_hash: String,
+    path: String,
+    diff: String,
+}
+
 #[tauri::command]
 fn detect_git() -> Result<String, String> {
     let output = Command::new("git")
@@ -163,11 +185,7 @@ fn git_status(repo_path: String) -> Result<GitStatusResponse, String> {
         }
     }
 
-    Ok(GitStatusResponse {
-        branch,
-        staged,
-        working,
-    })
+    Ok(GitStatusResponse { branch, staged, working })
 }
 
 fn run_git_path_action(repo_path: String, args: Vec<&str>, path: String, success: &str) -> Result<String, String> {
@@ -268,6 +286,107 @@ fn git_commit(repo_path: String, message: String) -> Result<CommitResult, String
     })
 }
 
+#[tauri::command]
+fn git_history(repo_path: String) -> Result<Vec<HistoryCommit>, String> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .args(["log", "--pretty=format:%H%x1f%h%x1f%an%x1f%cI%x1f%s", "-n", "50"])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut commits = Vec::new();
+
+    for line in text.lines() {
+        let parts: Vec<&str> = line.split('\x1f').collect();
+        if parts.len() != 5 {
+            continue;
+        }
+
+        commits.push(HistoryCommit {
+            hash: parts[0].to_string(),
+            short_hash: parts[1].to_string(),
+            author: parts[2].to_string(),
+            timestamp: parts[3].to_string(),
+            message: parts[4].to_string(),
+        });
+    }
+
+    Ok(commits)
+}
+
+#[tauri::command]
+fn git_changed_files_from_commit(repo_path: String, commit_hash: String) -> Result<Vec<ChangedFile>, String> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .args(["diff", "--name-status", &commit_hash, "HEAD"])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut files = Vec::new();
+
+    for line in text.lines() {
+        let mut parts = line.split_whitespace();
+        let status = parts.next().unwrap_or("").to_string();
+        let path = parts.last().unwrap_or("").to_string();
+
+        if !path.is_empty() {
+            files.push(ChangedFile { path, status });
+        }
+    }
+
+    Ok(files)
+}
+
+#[tauri::command]
+fn git_diff_file_from_commit(repo_path: String, commit_hash: String, path: String) -> Result<DiffResult, String> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .args(["diff", &commit_hash, "HEAD", "--"])
+        .arg(&path)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+
+    Ok(DiffResult {
+        commit_hash,
+        path,
+        diff: String::from_utf8_lossy(&out.stdout).to_string(),
+    })
+}
+
+#[tauri::command]
+fn git_restore_file_from_commit(repo_path: String, commit_hash: String, path: String) -> Result<String, String> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .args(["checkout", &commit_hash, "--"])
+        .arg(&path)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if out.status.success() {
+        Ok(format!("Restored {} from snapshot {}", path, commit_hash))
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -277,7 +396,11 @@ pub fn run() {
             git_stage,
             git_unstage,
             git_restore,
-            git_commit
+            git_commit,
+            git_history,
+            git_changed_files_from_commit,
+            git_diff_file_from_commit,
+            git_restore_file_from_commit
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri app");
