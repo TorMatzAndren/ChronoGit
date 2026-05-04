@@ -205,6 +205,80 @@ fn run_git_path_action(repo_path: String, args: Vec<&str>, path: String, success
     }
 }
 
+fn validate_relative_path(path: &str) -> Result<(), String> {
+    if path.trim().is_empty() {
+        return Err("Path is empty.".into());
+    }
+
+    if path.starts_with('/') {
+        return Err("Absolute paths are not allowed.".into());
+    }
+
+    if path.split('/').any(|part| part == "..") {
+        return Err("Parent path traversal is not allowed.".into());
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+fn git_remove_untracked(repo_path: String, path: String) -> Result<String, String> {
+    validate_relative_path(&path)?;
+
+    let status_out = Command::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .args(["status", "--porcelain=v1", "--"])
+        .arg(&path)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !status_out.status.success() {
+        return Err(String::from_utf8_lossy(&status_out.stderr).trim().to_string());
+    }
+
+    let status_text = String::from_utf8_lossy(&status_out.stdout);
+
+    if !status_text.lines().any(|line| line.starts_with("?? ")) {
+        return Err("Remove blocked: ChronoGit only removes untracked files with this action.".into());
+    }
+
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .args(["clean", "-f", "--"])
+        .arg(&path)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if out.status.success() {
+        Ok(format!("Removed untracked file {}", path))
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+    }
+}
+
+#[tauri::command]
+fn git_ignore_path(repo_path: String, path: String) -> Result<String, String> {
+    use std::fs::OpenOptions;
+    use std::io::Write;
+    use std::path::PathBuf;
+
+    validate_relative_path(&path)?;
+
+    let ignore_path = PathBuf::from(&repo_path).join(".gitignore");
+
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&ignore_path)
+        .map_err(|e| format!("Could not open .gitignore: {}", e))?;
+
+    writeln!(file, "{}", path).map_err(|e| format!("Could not write .gitignore: {}", e))?;
+
+    Ok(format!("Added {} to .gitignore", path))
+}
+
 #[tauri::command]
 fn git_stage(repo_path: String, path: String) -> Result<String, String> {
     run_git_path_action(repo_path, vec!["add"], path, "Prepared")
@@ -396,6 +470,8 @@ pub fn run() {
             git_stage,
             git_unstage,
             git_restore,
+            git_remove_untracked,
+            git_ignore_path,
             git_commit,
             git_history,
             git_changed_files_from_commit,

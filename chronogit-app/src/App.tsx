@@ -304,15 +304,24 @@ function Timeline() {
 export default function App() {
   const [gitVersion, setGitVersion] = useState("Checking Git...");
   const [data, setData] = useState<GitStatusResponse | null>(null);
+  const [lastRefresh, setLastRefresh] = useState("");
   const [message, setMessage] = useState("");
   const [busyPath, setBusyPath] = useState("");
   const [expandedPath, setExpandedPath] = useState("");
   const [showPreflight, setShowPreflight] = useState(false);
   const [commitMessage, setCommitMessage] = useState("");
+  const [confirmAction, setConfirmAction] = useState<null | {
+    title: string;
+    body: string;
+    confirmLabel: string;
+    danger: boolean;
+    action: () => Promise<void>;
+  }>(null);
 
   async function refresh() {
     const result = await invoke<GitStatusResponse>("git_status", { repoPath });
     setData(result);
+    setLastRefresh(new Date().toLocaleTimeString());
   }
 
   useEffect(() => {
@@ -323,14 +332,7 @@ export default function App() {
     refresh().catch((err) => setMessage(`Status error: ${err}`));
   }, []);
 
-  async function runAction(action: "git_stage" | "git_unstage" | "git_restore", path: string) {
-    if (action === "git_restore") {
-      const ok = confirm(
-        `Restore means: discard local changes.\n\nPath:\n${path}\n\nChronoGit will ask Git to restore this file from the last committed snapshot. Continue?`
-      );
-      if (!ok) return;
-    }
-
+  async function executeAction(action: "git_stage" | "git_unstage" | "git_restore" | "git_remove_untracked" | "git_ignore_path", path: string) {
     try {
       setBusyPath(path);
       setMessage("");
@@ -342,6 +344,43 @@ export default function App() {
     } finally {
       setBusyPath("");
     }
+  }
+
+  async function runAction(action: "git_stage" | "git_unstage" | "git_restore" | "git_remove_untracked" | "git_ignore_path", path: string) {
+    if (action === "git_restore") {
+      setConfirmAction({
+        title: "Restore / discard local change",
+        body: `ChronoGit will ask Git to restore this file from the last committed snapshot. This discards your local working-folder edit.\n\nPath:\n${path}`,
+        confirmLabel: "Restore / discard",
+        danger: true,
+        action: async () => executeAction(action, path),
+      });
+      return;
+    }
+
+    if (action === "git_remove_untracked") {
+      setConfirmAction({
+        title: "Remove untracked file",
+        body: `This file is not in Git history. Removing it deletes it from the working folder.\n\nPath:\n${path}`,
+        confirmLabel: "Remove file",
+        danger: true,
+        action: async () => executeAction(action, path),
+      });
+      return;
+    }
+
+    if (action === "git_ignore_path") {
+      setConfirmAction({
+        title: "Add path to .gitignore",
+        body: `ChronoGit will add this path to .gitignore so Git stops showing it as an untracked file.\n\nPath:\n${path}`,
+        confirmLabel: "Add to .gitignore",
+        danger: false,
+        action: async () => executeAction(action, path),
+      });
+      return;
+    }
+
+    await executeAction(action, path);
   }
 
   async function confirmSnapshot() {
@@ -358,6 +397,16 @@ export default function App() {
       await refresh();
     } catch (err) {
       setMessage(`SNAPSHOT FAILED: ${err}`);
+    }
+  }
+
+  async function refreshAppState() {
+    try {
+      setMessage("Refreshing ChronoGit state...");
+      await refresh();
+      setMessage("ChronoGit state refreshed.");
+    } catch (err) {
+      setMessage(`Refresh failed: ${err}`);
     }
   }
 
@@ -411,6 +460,17 @@ export default function App() {
               Restore / discard
             </button>
           ) : null}
+
+          {!change.staged && change.status === "untracked" ? (
+            <>
+              <button className="danger-button" disabled={busyPath === change.path} onClick={() => runAction("git_remove_untracked", change.path)}>
+                Remove untracked file
+              </button>
+              <button disabled={busyPath === change.path} onClick={() => runAction("git_ignore_path", change.path)}>
+                Add to .gitignore
+              </button>
+            </>
+          ) : null}
         </div>
       </article>
     );
@@ -456,6 +516,11 @@ export default function App() {
           <div>{gitVersion}</div>
           <div className="status-box__label">Branch</div>
           <div>{data.branch}</div>
+          <div className="status-box__label">State</div>
+          <div>{lastRefresh || "not refreshed yet"}</div>
+          <button className="status-refresh-button" onClick={refreshAppState}>
+            Refresh app state
+          </button>
         </div>
       </header>
 
@@ -527,6 +592,32 @@ export default function App() {
       </section>
 
       <Timeline />
+
+      {confirmAction ? (
+        <div className="confirm-overlay">
+          <div className={`confirm-modal ${confirmAction.danger ? "confirm-modal--danger" : ""}`}>
+            <div className="confirm-modal__eyebrow">
+              {confirmAction.danger ? "Destructive action" : "Confirmation"}
+            </div>
+            <h2>{confirmAction.title}</h2>
+            <pre>{confirmAction.body}</pre>
+
+            <div className="confirm-modal__actions">
+              <button onClick={() => setConfirmAction(null)}>Cancel</button>
+              <button
+                className={confirmAction.danger ? "danger-button" : "confirm"}
+                onClick={async () => {
+                  const actionToRun = confirmAction.action;
+                  setConfirmAction(null);
+                  await actionToRun();
+                }}
+              >
+                {confirmAction.confirmLabel}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {showPreflight ? (
         <div className="preflight-overlay">
