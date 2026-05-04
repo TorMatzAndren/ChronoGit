@@ -1142,3 +1142,66 @@ p {
   background: rgba(255, 80, 80, 0.18);
   border-left-color: #ff5d5d;
 }
+
+.ollama-chat {
+  flex: 0 0 auto;
+  max-height: 260px;
+  overflow: auto;
+  margin: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(100, 240, 200, 0.24);
+  background:
+    radial-gradient(circle at top left, rgba(100, 240, 200, 0.08), transparent 20rem),
+    rgba(0, 0, 0, 0.30);
+}
+
+.ollama-chat__title {
+  padding: 8px 10px;
+  color: #64f0c8;
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.ollama-chat pre {
+  margin: 0;
+  padding: 10px;
+  white-space: pre-wrap;
+  color: #d7dde7;
+  font-size: 12px;
+  line-height: 1.45;
+  font-family: Inter, system-ui, sans-serif;
+}
+
+.ollama-chat__status {
+  padding: 8px 10px;
+  color: #ffd680;
+  font-size: 11px;
+  line-height: 1.35;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.ollama-chat__read-row {
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Qwen explanation must remain visible inside diff-viewer */
+.diff-viewer .ollama-chat pre {
+  display: block !important;
+  margin: 0;
+  padding: 10px;
+  white-space: pre-wrap;
+  color: #d7dde7;
+  font-size: 12px;
+  line-height: 1.45;
+  font-family: Inter, system-ui, sans-serif;
+}
+
+.ollama-chat__read-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}

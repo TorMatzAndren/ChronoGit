@@ -42,6 +42,14 @@ type DiffResult = {
   diff: string;
 };
 
+type ExplainDiffResult = {
+  model: string;
+  explanation: string;
+  tdp_before_watts: string;
+  tdp_active_watts: string;
+  tdp_reset_watts: string;
+};
+
 const repoPath = "/home/dretski/projects/ChronoGit";
 
 function group(changes: FileChange[]) {
@@ -199,6 +207,10 @@ function Timeline({
   const [changedFiles, setChangedFiles] = useState<ChangedFile[]>([]);
   const [selectedFile, setSelectedFile] = useState<ChangedFile | null>(null);
   const [diff, setDiff] = useState("");
+  const [explainText, setExplainText] = useState("");
+  const [explainStatus, setExplainStatus] = useState("");
+  const [explainOpen, setExplainOpen] = useState(false);
+  const [explainBusy, setExplainBusy] = useState(false);
   const [error, setError] = useState("");
 
   async function loadHistory() {
@@ -220,6 +232,11 @@ function Timeline({
       setSelected(commit);
       setSelectedFile(null);
       setDiff("Select a changed file to view its diff.");
+      setExplainText("");
+      setExplainStatus("");
+      setExplainOpen(false);
+      setExplainOpen(false);
+      setExplainStatus("");
       const files = await invoke<ChangedFile[]>("git_changed_files_from_commit", {
         repoPath,
         commitHash: commit.hash,
@@ -239,6 +256,9 @@ function Timeline({
     try {
       setSelectedFile(file);
       setDiff("Loading file diff...");
+      setExplainText("");
+      setExplainStatus("");
+      setExplainOpen(false);
       const result = await invoke<DiffResult>("git_diff_file_from_commit", {
         repoPath,
         commitHash: selected.hash,
@@ -249,6 +269,34 @@ function Timeline({
     } catch (err) {
       setDiff("");
       setError(`File diff failed: ${err}`);
+    }
+  }
+
+  async function explainSelectedDiff() {
+    if (!selectedFile || !diff.trim() || diff === "Loading file diff...") return;
+
+    try {
+      setExplainBusy(true);
+      setExplainStatus("Local Qwen is running through Ollama. GPU TDP guard requested: 60% during job, reset afterward.");
+      setExplainText("Waiting for local Qwen...");
+      const result = await invoke<ExplainDiffResult>("explain_diff_with_ollama", {
+        model: "qwen3:8b",
+        diff,
+        filePath: selectedFile.path,
+        commitHash: selected?.short_hash ?? "unknown",
+        commitMessage: selected?.message ?? "unknown",
+      });
+      setExplainStatus(`Local Qwen finished. GPU TDP: ${result.tdp_before_watts}W → ${result.tdp_active_watts}W → ${result.tdp_reset_watts}W.`);
+      setExplainText(result.explanation || "Qwen returned an empty explanation.");
+      setExplainOpen(true);
+      setError("");
+    } catch (err) {
+      setExplainText("");
+      setExplainStatus("");
+      setExplainOpen(false);
+      setError(`Local Qwen explanation failed: ${err}`);
+    } finally {
+      setExplainBusy(false);
     }
   }
 
@@ -342,9 +390,38 @@ function Timeline({
 
           {selectedFile ? (
             <div className="diff-actions">
+              <button onClick={explainSelectedDiff} disabled={explainBusy || !diff.trim()}>
+                {explainBusy ? "Qwen is thinking..." : "Ask local Qwen to explain this diff"}
+              </button>
               <button className="danger-button" onClick={restoreSelectedFile}>
                 Restore this file from selected snapshot
               </button>
+            </div>
+          ) : null}
+
+          {(explainText || explainStatus) ? (
+            <div className="ollama-chat">
+              <div className="ollama-chat__title">Local Qwen · Experimental explanation</div>
+              {explainStatus ? <div className="ollama-chat__status">{explainStatus}</div> : null}
+              {explainText ? (
+                <div className="ollama-chat__read-row">
+                  <button onClick={() => setExplainOpen((value) => !value)}>
+                    {explainOpen ? "Hide Qwen explanation" : "Read Qwen explanation"}
+                  </button>
+                  <button
+                    onClick={async () => {
+                      await navigator.clipboard.writeText(explainText);
+                      setExplainStatus("Qwen explanation copied to clipboard.");
+                    }}
+                  >
+                    Copy result
+                  </button>
+                  <button onClick={explainSelectedDiff} disabled={explainBusy}>
+                    Ask again
+                  </button>
+                </div>
+              ) : null}
+              {explainText && explainOpen ? <pre>{explainText}</pre> : null}
             </div>
           ) : null}
 
