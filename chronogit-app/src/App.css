@@ -1855,3 +1855,33 @@ p {
   font-size: 12px;
   line-height: 1.35;
 }
+
+/* Snapshot impact + remote truth context */
+.snapshot-boundary-box p + p {
+  margin-top: 5px;
+  color: #aeb8c8;
+}
+
+.snapshot-impact-warning {
+  margin-top: 9px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 214, 128, 0.30);
+  background: rgba(255, 214, 128, 0.08);
+}
+
+.snapshot-impact-warning strong {
+  display: block;
+  color: #ffd680;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 3px;
+}
+
+.snapshot-impact-warning span {
+  display: block;
+  color: #d7dde7;
+  font-size: 12px;
+  line-height: 1.35;
+}

@@ -94,6 +94,48 @@ type LocalModel = {
 };
 
 
+
+function classifySnapshotImpact(preflight: CommitPreflight | null) {
+  if (!preflight) return null;
+
+  const churn = preflight.insertions + preflight.deletions;
+  const flags: string[] = [];
+
+  if (churn >= 500) flags.push("Large snapshot");
+  if (preflight.insertions >= preflight.deletions * 5 && preflight.insertions >= 100) flags.push("Additive-heavy");
+  if (preflight.deletions >= 50) flags.push("Deletion-heavy");
+
+  if (!flags.length) return null;
+
+  return {
+    label: flags.join(" · "),
+    text:
+      churn >= 500
+        ? "This snapshot contains a large amount of changed text. Review the included files before creating history."
+        : "This snapshot has an unusual change shape. Review the included files before creating history.",
+  };
+}
+
+function snapshotRemoteSentence(remote: GitRemoteStatus | null) {
+  if (!remote || !remote.has_remote) {
+    return "No remote is attached. This snapshot stays only on this computer.";
+  }
+
+  if (remote.is_diverged) {
+    return `Remote context: your branch is diverged (+${remote.ahead} / -${remote.behind}). This snapshot still remains local until pushed.`;
+  }
+
+  if (remote.ahead > 0) {
+    return `Remote context: you already have ${remote.ahead} local snapshot(s) not uploaded. This new snapshot will increase that local-ahead count.`;
+  }
+
+  if (remote.behind > 0) {
+    return `Remote context: the remote has ${remote.behind} snapshot(s) you do not have locally. Consider reviewing before sharing new work.`;
+  }
+
+  return "Remote context: local and remote are currently in sync. This new snapshot still remains local until pushed.";
+}
+
 function remoteStateLabel(remote: GitRemoteStatus | null) {
   if (!remote || !remote.has_remote) return "LOCAL ONLY";
   if (remote.is_diverged) return "DIVERGED";
@@ -901,6 +943,7 @@ export default function App() {
   );
   const hasCritical = data.staged.some((file) => file.risk === "critical");
   const selectedModel = localModels.find((model) => model.name === llmModel);
+  const snapshotImpact = classifySnapshotImpact(commitPreflight);
 
   return (
     <main className="app-shell">
@@ -1260,6 +1303,13 @@ export default function App() {
                 <div><strong>-{commitPreflight?.deletions ?? 0}</strong><span>deletions</span></div>
               </div>
               <p>This creates a LOCAL snapshot only. It does not upload, push, or share anything.</p>
+              <p>{snapshotRemoteSentence(remoteStatus)}</p>
+              {snapshotImpact ? (
+                <div className="snapshot-impact-warning">
+                  <strong>{snapshotImpact.label}</strong>
+                  <span>{snapshotImpact.text}</span>
+                </div>
+              ) : null}
             </div>
 
             <h3>Included files ({data.staged.length})</h3>
