@@ -1382,3 +1382,32 @@ p {
     grid-template-columns: 1fr;
   }
 }
+
+/* Time Machine: make snapshot list match the horizontal panels */
+.timeline-layout--three {
+  align-items: stretch;
+}
+
+.timeline-list,
+.timeline-files,
+.diff-viewer {
+  height: 520px;
+  max-height: 520px;
+}
+
+.timeline-list {
+  min-height: 520px;
+}
+
+@media (max-width: 1300px) {
+  .timeline-list,
+  .timeline-files,
+  .diff-viewer {
+    height: auto;
+    max-height: 520px;
+  }
+
+  .timeline-list {
+    min-height: 260px;
+  }
+}
