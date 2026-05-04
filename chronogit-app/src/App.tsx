@@ -164,12 +164,14 @@ function renderPrettyDiff(diff: string) {
     return <div className="diff-placeholder">No diff for this file.</div>;
   }
 
+  const lines = diff.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+
   return (
     <div className="diff-pretty">
-      {diff.split("\\n").map((line, i) => (
-        <div className={diffLineClass(line)} key={i}>
-          <span className="diff-line__num">{i + 1}</span>
-          <span className="diff-line__text">{line || " "}</span>
+      {lines.map((line, index) => (
+        <div className={diffLineClass(line)} key={`${index}-${line.slice(0, 24)}`}>
+          <span className="diff-line__num">{index + 1}</span>
+          <code className="diff-line__text">{line || " "}</code>
         </div>
       ))}
     </div>
@@ -327,9 +329,7 @@ function Timeline({ refreshTick }: { refreshTick: number }) {
             </div>
           ) : null}
 
-          <div className="diff-pretty">
-            {selected ? (() => { try { return renderPrettyDiff(diff); } catch (e) { return <pre>{diff}</pre>; } })() : <div className="diff-placeholder">Select a snapshot to inspect changed files.</div>}
-          </div>
+          {selected ? renderPrettyDiff(diff) : <div className="diff-placeholder">Select a snapshot to inspect changed files.</div>}
         </div>
       </div>
     </section>
