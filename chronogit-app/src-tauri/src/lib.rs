@@ -473,6 +473,76 @@ struct OllamaGenerateResponse {
     error: Option<String>,
 }
 
+#[derive(Serialize)]
+struct LocalModel {
+    name: String,
+    engine: String,
+    size: u64,
+    modified_at: String,
+    family: String,
+    parameter_size: String,
+    quantization_level: String,
+}
+
+#[derive(Deserialize)]
+struct OllamaTagsResponse {
+    models: Vec<OllamaTagModel>,
+}
+
+#[derive(Deserialize)]
+struct OllamaTagModel {
+    name: String,
+    modified_at: String,
+    size: u64,
+    details: Option<OllamaTagDetails>,
+}
+
+#[derive(Deserialize)]
+struct OllamaTagDetails {
+    family: Option<String>,
+    parameter_size: Option<String>,
+    quantization_level: Option<String>,
+}
+
+#[tauri::command]
+fn list_local_llm_models(engine: String) -> Result<Vec<LocalModel>, String> {
+    if engine != "ollama" {
+        return Err("Only Ollama model discovery is implemented right now.".into());
+    }
+
+    let response = reqwest::blocking::Client::new()
+        .get("http://127.0.0.1:11434/api/tags")
+        .send()
+        .map_err(|e| format!("Could not query local Ollama models: {}", e))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().unwrap_or_else(|_| "Could not read Ollama error body.".to_string());
+        return Err(format!("Ollama model query failed with {}: {}", status, body));
+    }
+
+    let parsed: OllamaTagsResponse = response
+        .json()
+        .map_err(|e| format!("Could not parse Ollama model list: {}", e))?;
+
+    let mut models: Vec<LocalModel> = parsed.models.into_iter().map(|model| {
+        let details = model.details;
+        LocalModel {
+            name: model.name,
+            engine: "ollama".to_string(),
+            size: model.size,
+            modified_at: model.modified_at,
+            family: details.as_ref().and_then(|d| d.family.clone()).unwrap_or_else(|| "unknown".to_string()),
+            parameter_size: details.as_ref().and_then(|d| d.parameter_size.clone()).unwrap_or_else(|| "unknown".to_string()),
+            quantization_level: details.and_then(|d| d.quantization_level).unwrap_or_else(|| "unknown".to_string()),
+        }
+    }).collect();
+
+    models.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(models)
+}
+
+
 fn command_error(command: &str, out: &std::process::Output) -> String {
     let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
     let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
@@ -666,9 +736,9 @@ fn explain_diff_with_ollama(
     commit_hash: String,
     commit_message: String,
 ) -> Result<ExplainDiffResult, String> {
-    let allowed_models = ["qwen3:8b", "llama3.1:8b"];
-    if !allowed_models.contains(&model.as_str()) {
-        return Err("Model blocked: only local allowed models may be used.".into());
+    let local_models = list_local_llm_models("ollama".to_string())?;
+    if !local_models.iter().any(|local_model| local_model.name == model) {
+        return Err(format!("Model blocked or unavailable locally: {}", model));
     }
 
     if diff.trim().is_empty() {
@@ -838,6 +908,7 @@ pub fn run() {
             git_changed_files_from_commit,
             git_diff_file_from_commit,
             explain_diff_with_ollama,
+            list_local_llm_models,
             git_restore_file_from_commit
         ])
         .run(tauri::generate_context!())

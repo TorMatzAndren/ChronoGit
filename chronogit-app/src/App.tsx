@@ -50,6 +50,16 @@ type ExplainDiffResult = {
   tdp_reset_watts: string;
 };
 
+type LocalModel = {
+  name: string;
+  engine: string;
+  size: number;
+  modified_at: string;
+  family: string;
+  parameter_size: string;
+  quantization_level: string;
+};
+
 const repoPath = "/home/dretski/projects/ChronoGit";
 
 function group(changes: FileChange[]) {
@@ -198,9 +208,13 @@ type ConfirmAction = {
 function Timeline({
   refreshTick,
   setConfirmAction,
+  llmEngine,
+  llmModel,
 }: {
   refreshTick: number;
   setConfirmAction: (action: ConfirmAction | null) => void;
+  llmEngine: string;
+  llmModel: string;
 }) {
   const [history, setHistory] = useState<HistoryCommit[]>([]);
   const [selected, setSelected] = useState<HistoryCommit | null>(null);
@@ -277,16 +291,16 @@ function Timeline({
 
     try {
       setExplainBusy(true);
-      setExplainStatus("Local Qwen is running through Ollama. GPU TDP guard requested: 60% during job, reset afterward.");
-      setExplainText("Waiting for local Qwen...");
+      setExplainStatus(`Local ${llmModel} is running through ${llmEngine}. GPU TDP guard requested: 60% during job, reset afterward.`);
+      setExplainText(`Waiting for local ${llmModel}...`);
       const result = await invoke<ExplainDiffResult>("explain_diff_with_ollama", {
-        model: "qwen3:8b",
+        model: llmModel,
         diff,
         filePath: selectedFile.path,
         commitHash: selected?.short_hash ?? "unknown",
         commitMessage: selected?.message ?? "unknown",
       });
-      setExplainStatus(`Local Qwen finished. GPU TDP: ${result.tdp_before_watts}W → ${result.tdp_active_watts}W → ${result.tdp_reset_watts}W.`);
+      setExplainStatus(`Local ${result.model} finished. GPU TDP: ${result.tdp_before_watts}W → ${result.tdp_active_watts}W → ${result.tdp_reset_watts}W.`);
       setExplainText(result.explanation || "Qwen returned an empty explanation.");
       setExplainOpen(true);
       setError("");
@@ -294,7 +308,7 @@ function Timeline({
       setExplainText("");
       setExplainStatus("");
       setExplainOpen(false);
-      setError(`Local Qwen explanation failed: ${err}`);
+      setError(`Local LLM explanation failed: ${err}`);
     } finally {
       setExplainBusy(false);
     }
@@ -330,6 +344,7 @@ function Timeline({
   useEffect(() => {
     loadHistory();
   }, [refreshTick]);
+
 
   return (
     <section className="timeline-panel">
@@ -390,21 +405,23 @@ function Timeline({
 
           {selectedFile ? (
             <div className="diff-actions">
-              <button onClick={explainSelectedDiff} disabled={explainBusy || !diff.trim()}>
-                {explainBusy ? "Qwen is thinking..." : "Ask local Qwen to explain this diff"}
-              </button>
-              <button className="danger-button" onClick={restoreSelectedFile}>
-                Restore this file from selected snapshot
-              </button>
+              <div className="diff-action-row">
+                <button onClick={explainSelectedDiff} disabled={explainBusy || !diff.trim() || !llmModel}>
+                  {explainBusy ? `${llmModel} is thinking...` : `Ask ${llmModel} to explain this diff`}
+                </button>
+                <button className="danger-button" onClick={restoreSelectedFile}>
+                  Restore this file from selected snapshot
+                </button>
+              </div>
             </div>
           ) : null}
 
           {(explainText || explainStatus) ? (
             <div className="ollama-chat">
-              <div className="ollama-chat__title">Local Qwen · Experimental explanation</div>
+              <div className="ollama-chat__title">Local LLM · Experimental explanation</div>
               {explainStatus ? <div className="ollama-chat__status">{explainStatus}</div> : null}
               <div className="ollama-chat__warning">
-                Local Qwen is advisory. The Git diff remains the truth. Verify claims against changed lines.
+                Local LLM output is advisory. The Git diff remains the truth. Verify claims against changed lines.
               </div>
               {explainText ? (
                 <div className="ollama-chat__read-row">
@@ -445,6 +462,9 @@ export default function App() {
   const [showPreflight, setShowPreflight] = useState(false);
   const [commitMessage, setCommitMessage] = useState("");
   const [historyRefreshTick, setHistoryRefreshTick] = useState(0);
+  const [llmEngine, setLlmEngine] = useState(() => localStorage.getItem("chronogit_llm_engine") || "ollama");
+  const [llmModel, setLlmModel] = useState(() => localStorage.getItem("chronogit_llm_model") || "qwen3:8b");
+  const [localModels, setLocalModels] = useState<LocalModel[]>([]);
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
 
   async function refresh() {
@@ -460,6 +480,15 @@ export default function App() {
 
     refresh().catch((err) => setMessage(`Status error: ${err}`));
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem("chronogit_llm_engine", llmEngine);
+    void loadLocalModels(llmEngine);
+  }, [llmEngine]);
+
+  useEffect(() => {
+    localStorage.setItem("chronogit_llm_model", llmModel);
+  }, [llmModel]);
 
   async function executeAction(action: "git_stage" | "git_unstage" | "git_restore" | "git_remove_untracked" | "git_ignore_path", path: string) {
     try {
@@ -538,6 +567,21 @@ export default function App() {
       setMessage("ChronoGit state and Time Machine refreshed.");
     } catch (err) {
       setMessage(`Refresh failed: ${err}`);
+    }
+  }
+
+  async function loadLocalModels(engine = llmEngine) {
+    try {
+      const models = await invoke<LocalModel[]>("list_local_llm_models", { engine });
+      setLocalModels(models);
+
+      if (models.length > 0 && !models.some((model) => model.name === llmModel)) {
+        setLlmModel(models[0].name);
+        localStorage.setItem("chronogit_llm_model", models[0].name);
+      }
+    } catch (err) {
+      setLocalModels([]);
+      setMessage(`Local LLM model discovery failed: ${err}`);
     }
   }
 
@@ -629,6 +673,7 @@ export default function App() {
     file.risk === "danger" || file.risk === "critical" || file.risk === "evidence"
   );
   const hasCritical = data.staged.some((file) => file.risk === "critical");
+  const selectedModel = localModels.find((model) => model.name === llmModel);
 
   return (
     <main className="app-shell">
@@ -642,16 +687,63 @@ export default function App() {
           </p>
         </div>
 
-        <div className="status-box">
-          <div className="status-box__label">Git</div>
-          <div>{gitVersion}</div>
-          <div className="status-box__label">Branch</div>
-          <div>{data.branch}</div>
-          <div className="status-box__label">State</div>
-          <div>{lastRefresh || "not refreshed yet"}</div>
-          <button className="status-refresh-button" onClick={refreshAppState}>
-            Refresh app state
-          </button>
+        <div className="hero-side">
+          <div className="status-box">
+            <div className="status-box__label">Git</div>
+            <div>{gitVersion}</div>
+            <div className="status-box__label">Branch</div>
+            <div>{data.branch}</div>
+            <div className="status-box__label">State</div>
+            <div>{lastRefresh || "not refreshed yet"}</div>
+            <button className="status-refresh-button" onClick={refreshAppState}>
+              Refresh app state
+            </button>
+          </div>
+
+          <div className="llm-main-card">
+            <div className="llm-main-card__title">Local LLM</div>
+            <div className="llm-main-card__note">Local-only explain layer. No cloud API.</div>
+
+            <div className="llm-main-card__controls">
+              <label>
+                Engine
+                <select
+                  value={llmEngine}
+                  onChange={(event) => setLlmEngine(event.target.value)}
+                >
+                  <option value="ollama">Ollama</option>
+                </select>
+              </label>
+
+              <label>
+                Model
+                <select
+                  value={llmModel}
+                  onChange={(event) => setLlmModel(event.target.value)}
+                >
+                  {localModels.length ? (
+                    localModels.map((model) => (
+                      <option key={model.name} value={model.name}>
+                        {model.name} · {model.parameter_size} · {model.quantization_level}
+                      </option>
+                    ))
+                  ) : (
+                    <option value={llmModel}>{llmModel || "No models discovered"}</option>
+                  )}
+                </select>
+              </label>
+            </div>
+
+            <div className="llm-main-card__meta">
+              {selectedModel
+                ? `${selectedModel.family} · ${selectedModel.parameter_size} · ${selectedModel.quantization_level} · ${(selectedModel.size / 1024 / 1024 / 1024).toFixed(1)} GB`
+                : "Model metadata unavailable"}
+            </div>
+
+            <button className="status-refresh-button" onClick={() => loadLocalModels()}>
+              Scan installed models
+            </button>
+          </div>
         </div>
       </header>
 
@@ -722,7 +814,12 @@ export default function App() {
         </div>
       </section>
 
-      <Timeline refreshTick={historyRefreshTick} setConfirmAction={setConfirmAction} />
+      <Timeline
+        refreshTick={historyRefreshTick}
+        setConfirmAction={setConfirmAction}
+        llmEngine={llmEngine}
+        llmModel={llmModel}
+      />
 
       {confirmAction ? (
         <div className="confirm-overlay">
