@@ -592,6 +592,7 @@ export default function App() {
   const [uiExplainOpen, setUiExplainOpen] = useState(false);
   const [uiExplainBusy, setUiExplainBusy] = useState(false);
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
+  const [lastAction, setLastAction] = useState("No file-changing action performed in this session.");
 
   async function refresh(path = repoPath) {
     const [statusResult, remoteResult] = await Promise.all([
@@ -652,6 +653,7 @@ export default function App() {
       setMessage("");
       const result = await invoke<string>(action, { repoPath, path });
       setMessage(result);
+      setLastAction(`${result}. Recovery depends on the action: committed history can be inspected in Time Machine; uncommitted discarded/untracked deletions may need manual re-editing or external backups.`);
       await refresh();
     } catch (err) {
       setMessage(`Action failed: ${err}`);
@@ -717,6 +719,7 @@ export default function App() {
       });
 
       setMessage(result.message);
+      setLastAction(`${result.message}. This snapshot is now visible in local Time Machine history. It is not uploaded unless you push separately.`);
       setCommitMessage("");
       setShowPreflight(false);
       await refresh();
@@ -1109,6 +1112,24 @@ export default function App() {
         </section>
       ) : null}
 
+      <section className="safety-strip">
+        <div>
+          <strong>Last action</strong>
+          <span>{lastAction}</span>
+        </div>
+      </section>
+
+      <section className="git-visibility-note">
+        <div>
+          <strong>Untracked</strong>
+          <span>Git sees these files in the folder, but they are not part of history unless prepared.</span>
+        </div>
+        <div>
+          <strong>Ignored</strong>
+          <span>Git is configured not to show these paths in normal status. They are hidden from normal ChronoGit change lists.</span>
+        </div>
+      </section>
+
       <section className="flow-strip">
         <div className="flow-step">
           <strong>1. Working files</strong>
@@ -1309,7 +1330,12 @@ export default function App() {
                   <strong>{snapshotImpact.label}</strong>
                   <span>{snapshotImpact.text}</span>
                 </div>
-              ) : null}
+              ) : (
+                <div className="snapshot-impact-ok">
+                  <strong>No large-impact warning</strong>
+                  <span>This snapshot is below ChronoGit's deterministic size-risk thresholds.</span>
+                </div>
+              )}
             </div>
 
             <h3>Included files ({data.staged.length})</h3>
