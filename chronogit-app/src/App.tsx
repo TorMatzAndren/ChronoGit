@@ -148,7 +148,7 @@ function explainEntry(change: FileChange) {
   return ["Review this Git change before preparing or committing it."];
 }
 
-function Timeline() {
+function Timeline({ refreshTick }: { refreshTick: number }) {
   const [history, setHistory] = useState<HistoryCommit[]>([]);
   const [selected, setSelected] = useState<HistoryCommit | null>(null);
   const [changedFiles, setChangedFiles] = useState<ChangedFile[]>([]);
@@ -227,7 +227,7 @@ function Timeline() {
 
   useEffect(() => {
     loadHistory();
-  }, []);
+  }, [refreshTick]);
 
   return (
     <section className="timeline-panel">
@@ -310,6 +310,7 @@ export default function App() {
   const [expandedPath, setExpandedPath] = useState("");
   const [showPreflight, setShowPreflight] = useState(false);
   const [commitMessage, setCommitMessage] = useState("");
+  const [historyRefreshTick, setHistoryRefreshTick] = useState(0);
   const [confirmAction, setConfirmAction] = useState<null | {
     title: string;
     body: string;
@@ -395,6 +396,7 @@ export default function App() {
       setCommitMessage("");
       setShowPreflight(false);
       await refresh();
+      setHistoryRefreshTick((value) => value + 1);
     } catch (err) {
       setMessage(`SNAPSHOT FAILED: ${err}`);
     }
@@ -404,7 +406,8 @@ export default function App() {
     try {
       setMessage("Refreshing ChronoGit state...");
       await refresh();
-      setMessage("ChronoGit state refreshed.");
+      setHistoryRefreshTick((value) => value + 1);
+      setMessage("ChronoGit state and Time Machine refreshed.");
     } catch (err) {
       setMessage(`Refresh failed: ${err}`);
     }
@@ -591,7 +594,7 @@ export default function App() {
         </div>
       </section>
 
-      <Timeline />
+      <Timeline refreshTick={historyRefreshTick} />
 
       {confirmAction ? (
         <div className="confirm-overlay">
