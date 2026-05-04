@@ -980,3 +980,68 @@ p {
   color: #ffb3b3;
   background: rgba(255, 93, 93, 0.10);
 }
+
+/* Strong readable diff renderer override */
+.diff-pretty {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 8px 0;
+  background: #050b0e;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.diff-line {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  gap: 8px;
+  padding: 1px 10px;
+  color: #c8d2e2;
+  white-space: pre;
+  border-left: 3px solid transparent;
+}
+
+.diff-line__num {
+  color: #536170;
+  text-align: right;
+  user-select: none;
+}
+
+.diff-line__text {
+  overflow: visible;
+}
+
+.diff-line--header {
+  color: #9fc7ff;
+  background: rgba(117, 183, 255, 0.14);
+  border-left-color: #75b7ff;
+  font-weight: 900;
+  margin-top: 8px;
+}
+
+.diff-line--meta,
+.diff-line--file {
+  color: #9aa7b6;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.diff-line--hunk {
+  color: #ffd680;
+  background: rgba(255, 214, 128, 0.16);
+  border-left-color: #ffd680;
+  font-weight: 900;
+  margin-top: 6px;
+}
+
+.diff-line--add {
+  color: #b8ffd8;
+  background: rgba(50, 220, 130, 0.18);
+  border-left-color: #64f0c8;
+}
+
+.diff-line--remove {
+  color: #ffc0c0;
+  background: rgba(255, 80, 80, 0.18);
+  border-left-color: #ff5d5d;
+}
