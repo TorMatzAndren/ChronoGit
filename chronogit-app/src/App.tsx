@@ -403,6 +403,9 @@ function Timeline({
             <div className="ollama-chat">
               <div className="ollama-chat__title">Local Qwen · Experimental explanation</div>
               {explainStatus ? <div className="ollama-chat__status">{explainStatus}</div> : null}
+              <div className="ollama-chat__warning">
+                Local Qwen is advisory. The Git diff remains the truth. Verify claims against changed lines.
+              </div>
               {explainText ? (
                 <div className="ollama-chat__read-row">
                   <button onClick={() => setExplainOpen((value) => !value)}>

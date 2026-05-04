@@ -1205,3 +1205,12 @@ p {
   flex-wrap: wrap;
   gap: 6px;
 }
+
+.ollama-chat__warning {
+  padding: 8px 10px;
+  color: #ffd680;
+  font-size: 11px;
+  line-height: 1.35;
+  background: rgba(255, 214, 128, 0.07);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
