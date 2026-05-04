@@ -1045,3 +1045,30 @@ p {
   background: rgba(255, 80, 80, 0.18);
   border-left-color: #ff5d5d;
 }
+
+.diff-viewer pre {
+  display: none !important;
+}
+
+.diff-pretty {
+  display: block !important;
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 8px 0;
+  background: #050b0e;
+}
+
+.diff-line {
+  display: grid !important;
+  grid-template-columns: 52px minmax(0, 1fr);
+  gap: 8px;
+  padding: 1px 10px;
+  white-space: pre;
+  border-left: 3px solid transparent;
+}
+
+.diff-line__text {
+  display: block;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  white-space: pre;
+}
