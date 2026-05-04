@@ -179,7 +179,21 @@ function renderPrettyDiff(diff: string) {
 }
 
 
-function Timeline({ refreshTick }: { refreshTick: number }) {
+type ConfirmAction = {
+  title: string;
+  body: string;
+  confirmLabel: string;
+  danger: boolean;
+  action: () => Promise<void>;
+};
+
+function Timeline({
+  refreshTick,
+  setConfirmAction,
+}: {
+  refreshTick: number;
+  setConfirmAction: (action: ConfirmAction | null) => void;
+}) {
   const [history, setHistory] = useState<HistoryCommit[]>([]);
   const [selected, setSelected] = useState<HistoryCommit | null>(null);
   const [changedFiles, setChangedFiles] = useState<ChangedFile[]>([]);
@@ -241,23 +255,28 @@ function Timeline({ refreshTick }: { refreshTick: number }) {
   async function restoreSelectedFile() {
     if (!selected || !selectedFile) return;
 
-    const ok = confirm(
-      `DANGER: Restore file from old snapshot?\n\nFile:\n${selectedFile.path}\n\nSnapshot:\n${selected.short_hash} — ${selected.message}\n\nThis will modify your working folder. It will NOT commit automatically. Continue?`
-    );
+    const snapshot = selected;
+    const file = selectedFile;
 
-    if (!ok) return;
-
-    try {
-      const result = await invoke<string>("git_restore_file_from_commit", {
-        repoPath,
-        commitHash: selected.hash,
-        path: selectedFile.path,
-      });
-      setError("");
-      setDiff(`${result}\n\nThe file has been restored into your working folder. Review it before preparing or committing.`);
-    } catch (err) {
-      setError(`Restore from snapshot failed: ${err}`);
-    }
+    setConfirmAction({
+      title: "Restore file from old snapshot",
+      body: `ChronoGit will restore this file from an older snapshot into your working folder.\n\nFile:\n${file.path}\n\nSnapshot:\n${snapshot.short_hash} — ${snapshot.message}\n\nThis modifies your working folder. It does NOT commit automatically. Review before preparing or committing.`,
+      confirmLabel: "Restore file from snapshot",
+      danger: true,
+      action: async () => {
+        try {
+          const result = await invoke<string>("git_restore_file_from_commit", {
+            repoPath,
+            commitHash: snapshot.hash,
+            path: file.path,
+          });
+          setError("");
+          setDiff(`${result}\n\nThe file has been restored into your working folder. Review it before preparing or committing.`);
+        } catch (err) {
+          setError(`Restore from snapshot failed: ${err}`);
+        }
+      },
+    });
   }
 
   useEffect(() => {
@@ -346,13 +365,7 @@ export default function App() {
   const [showPreflight, setShowPreflight] = useState(false);
   const [commitMessage, setCommitMessage] = useState("");
   const [historyRefreshTick, setHistoryRefreshTick] = useState(0);
-  const [confirmAction, setConfirmAction] = useState<null | {
-    title: string;
-    body: string;
-    confirmLabel: string;
-    danger: boolean;
-    action: () => Promise<void>;
-  }>(null);
+  const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
 
   async function refresh() {
     const result = await invoke<GitStatusResponse>("git_status", { repoPath });
@@ -629,7 +642,7 @@ export default function App() {
         </div>
       </section>
 
-      <Timeline refreshTick={historyRefreshTick} />
+      <Timeline refreshTick={historyRefreshTick} setConfirmAction={setConfirmAction} />
 
       {confirmAction ? (
         <div className="confirm-overlay">
