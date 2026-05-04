@@ -19,15 +19,25 @@ struct GitStatusResponse {
     working: Vec<FileChange>,
 }
 
+#[derive(Serialize)]
+struct CommitResult {
+    ok: bool,
+    message: String,
+    commit_hash: String,
+}
+
 #[tauri::command]
 fn detect_git() -> Result<String, String> {
-    match Command::new("git").arg("--version").output() {
-        Ok(output) if output.status.success() => {
-            Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-        }
-        Ok(output) => Err(String::from_utf8_lossy(&output.stderr).trim().to_string()),
-        Err(_) => Err("Git not found in PATH".into()),
+    let output = Command::new("git")
+        .arg("--version")
+        .output()
+        .map_err(|_| "Git not found in PATH".to_string())?;
+
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
     }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
 fn classify_backup(path: &str) -> bool {
@@ -192,6 +202,72 @@ fn git_restore(repo_path: String, path: String) -> Result<String, String> {
     run_git_path_action(repo_path, vec!["restore"], path, "Restored")
 }
 
+#[tauri::command]
+fn git_commit(repo_path: String, message: String) -> Result<CommitResult, String> {
+    let trimmed = message.trim();
+
+    if trimmed.is_empty() {
+        return Err("Snapshot blocked: commit message is required.".into());
+    }
+
+    let conflict_check = Command::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .args(["diff", "--name-only", "--diff-filter=U"])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !conflict_check.status.success() {
+        return Err(String::from_utf8_lossy(&conflict_check.stderr).trim().to_string());
+    }
+
+    if !String::from_utf8_lossy(&conflict_check.stdout).trim().is_empty() {
+        return Err("Snapshot blocked: unresolved Git conflicts are present.".into());
+    }
+
+    let staged_check = Command::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .args(["diff", "--cached", "--quiet"])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if staged_check.status.success() {
+        return Err("Snapshot blocked: no prepared files are staged.".into());
+    }
+
+    let commit_out = Command::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .args(["commit", "-m"])
+        .arg(trimmed)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !commit_out.status.success() {
+        return Err(String::from_utf8_lossy(&commit_out.stderr).trim().to_string());
+    }
+
+    let hash_out = Command::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .args(["rev-parse", "--short", "HEAD"])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    let commit_hash = if hash_out.status.success() {
+        String::from_utf8_lossy(&hash_out.stdout).trim().to_string()
+    } else {
+        "unknown".to_string()
+    };
+
+    Ok(CommitResult {
+        ok: true,
+        message: format!("Snapshot created with Git commit: {}", commit_hash),
+        commit_hash,
+    })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -200,7 +276,8 @@ pub fn run() {
             git_status,
             git_stage,
             git_unstage,
-            git_restore
+            git_restore,
+            git_commit
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri app");

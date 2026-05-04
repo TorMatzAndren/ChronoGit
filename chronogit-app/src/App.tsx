@@ -186,7 +186,7 @@ export default function App() {
       setShowPreflight(false);
       await refresh();
     } catch (err) {
-      setMessage(`Commit failed: ${err}`);
+      setMessage(`SNAPSHOT FAILED: ${err}`);
     }
   }
 
@@ -318,7 +318,7 @@ export default function App() {
           <p>Jarri safety mode is active. ChronoGit reviews prepared files before any snapshot is created.</p>
         </div>
         <button disabled={data.staged.length === 0} onClick={() => setShowPreflight(true)}>
-          Review snapshot ({data.staged.length})
+          Review snapshot / Git commit ({data.staged.length})
         </button>
       </section>
 
@@ -396,7 +396,7 @@ export default function App() {
                 disabled={!commitMessage.trim() || hasCritical}
                 onClick={confirmSnapshot}
               >
-                Confirm snapshot
+                Create snapshot (Git commit)
               </button>
             </div>
           </div>

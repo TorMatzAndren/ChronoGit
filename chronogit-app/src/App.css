@@ -622,3 +622,10 @@ p {
 .resize-handle:hover {
   opacity: 1;
 }
+
+.message {
+  border-color: rgba(255, 93, 93, 0.45) !important;
+  background: rgba(255, 93, 93, 0.12) !important;
+  color: #ffd6d6 !important;
+  font-weight: 800;
+}
