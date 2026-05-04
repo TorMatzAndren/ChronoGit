@@ -96,7 +96,7 @@ function remoteStateLabel(remote: GitRemoteStatus | null) {
 }
 
 function remoteStateClass(remote: GitRemoteStatus | null) {
-  return remoteStateLabel(remote).toLowerCase().replaceAll(" ", "-");
+  return remoteStateLabel(remote).toLowerCase().replace(/ /g, "-");
 }
 
 function remoteTruthText(remote: GitRemoteStatus | null) {
@@ -722,6 +722,10 @@ export default function App() {
     }
   }
 
+  function beginnerTitle(text: string) {
+    return beginnerMode ? text : undefined;
+  }
+
   function ActionExplainButton({
     title,
     plainText,
@@ -793,7 +797,7 @@ export default function App() {
 
           {!change.staged ? (
             <>
-              <button disabled={busyPath === change.path} onClick={() => runAction("git_stage", change.path)}>
+              <button title={beginnerTitle("Prepare for commit\n\nMarks this file for the next snapshot. It does not commit yet.")} disabled={busyPath === change.path} onClick={() => runAction("git_stage", change.path)}>
                 Prepare for commit
               </button>
               <ActionExplainButton
@@ -804,7 +808,7 @@ export default function App() {
             </>
           ) : (
             <>
-              <button disabled={busyPath === change.path} onClick={() => runAction("git_unstage", change.path)}>
+              <button title={beginnerTitle("Remove from next commit\n\nTakes this file out of the next snapshot. Your file stays changed in the working folder.")} disabled={busyPath === change.path} onClick={() => runAction("git_unstage", change.path)}>
                 Remove from next commit
               </button>
               <ActionExplainButton
@@ -817,7 +821,7 @@ export default function App() {
 
           {!change.staged && change.status !== "untracked" ? (
             <>
-              <button className="danger-button" disabled={busyPath === change.path} onClick={() => runAction("git_restore", change.path)}>
+              <button className="danger-button" title={beginnerTitle("Restore / discard\n\nDestructive: throws away this file's local working-folder changes and returns it to the last committed version.")} disabled={busyPath === change.path} onClick={() => runAction("git_restore", change.path)}>
                 Restore / discard
               </button>
               <ActionExplainButton
@@ -831,7 +835,7 @@ export default function App() {
 
           {!change.staged && change.status === "untracked" ? (
             <>
-              <button className="danger-button" disabled={busyPath === change.path} onClick={() => runAction("git_remove_untracked", change.path)}>
+              <button className="danger-button" title={beginnerTitle("Remove untracked file\n\nDestructive: deletes a file Git does not track. Git cannot restore it from history.")} disabled={busyPath === change.path} onClick={() => runAction("git_remove_untracked", change.path)}>
                 Remove untracked file
               </button>
               <ActionExplainButton
@@ -840,7 +844,7 @@ export default function App() {
                 rawTruth={JSON.stringify(change, null, 2)}
                 kind="destructive_button"
               />
-              <button disabled={busyPath === change.path} onClick={() => runAction("git_ignore_path", change.path)}>
+              <button title={beginnerTitle("Add to .gitignore\n\nKeeps the file on disk but tells Git to stop showing it as untracked.")} disabled={busyPath === change.path} onClick={() => runAction("git_ignore_path", change.path)}>
                 Add to .gitignore
               </button>
               <ActionExplainButton
@@ -928,7 +932,7 @@ export default function App() {
 
             <div className="repo-main-card__path">{repoPath}</div>
 
-            <button className="status-refresh-button" onClick={loadRepos}>
+            <button className="status-refresh-button" title={beginnerTitle("Scan repositories\n\nSearches safe local folders for Git projects and updates the repository selector.")} onClick={loadRepos}>
               Scan repositories
             </button>
           </div>
@@ -941,7 +945,7 @@ export default function App() {
             <div className="status-box__label">State</div>
             <div>{lastRefresh || "not refreshed yet"}</div>
             <div className="button-with-help">
-              <button className="status-refresh-button" onClick={refreshAppState}>
+              <button className="status-refresh-button" title={beginnerTitle("Refresh app state\n\nReloads repository status, remote awareness, and Time Machine history. This does not change files.")} onClick={refreshAppState}>
                 Refresh app state
               </button>
               <ActionExplainButton
@@ -1010,7 +1014,7 @@ export default function App() {
             </div>
 
             <div className="button-with-help">
-              <button className="status-refresh-button" onClick={() => loadLocalModels()}>
+              <button className="status-refresh-button" title={beginnerTitle("Scan installed models\n\nAsks the selected local LLM engine which models are installed on this computer.")} onClick={() => loadLocalModels()}>
                 Scan installed models
               </button>
               <ActionExplainButton
@@ -1109,7 +1113,7 @@ export default function App() {
           >
             Ask LLM
           </button>
-          <button disabled={data.staged.length === 0} onClick={() => setShowPreflight(true)}>
+          <button title={beginnerTitle("Review snapshot / Git commit\n\nOpens preflight before creating a commit. Only prepared files will be included.")} disabled={data.staged.length === 0} onClick={() => setShowPreflight(true)}>
             Review snapshot / Git commit ({data.staged.length})
           </button>
           <ActionExplainButton
