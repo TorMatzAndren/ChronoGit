@@ -43,6 +43,13 @@ type CommitResult = {
   commit_hash: string;
 };
 
+type CommitPreflight = {
+  staged_files: number;
+  insertions: number;
+  deletions: number;
+  is_empty: boolean;
+};
+
 type HistoryCommit = {
   hash: string;
   short_hash: string;
@@ -528,6 +535,7 @@ export default function App() {
   const [expandedPath, setExpandedPath] = useState("");
   const [showPreflight, setShowPreflight] = useState(false);
   const [commitMessage, setCommitMessage] = useState("");
+  const [commitPreflight, setCommitPreflight] = useState<CommitPreflight | null>(null);
   const [historyRefreshTick, setHistoryRefreshTick] = useState(0);
   const [repoPath, setRepoPath] = useState(() => localStorage.getItem("chronogit_repo_path") || "/home/dretski/projects/ChronoGit");
   const [repos, setRepos] = useState<RepoInfo[]>([]);
@@ -645,6 +653,17 @@ export default function App() {
     }
 
     await executeAction(action, path);
+  }
+
+  async function openSnapshotPreflight() {
+    try {
+      setMessage("");
+      const result = await invoke<CommitPreflight>("git_commit_preflight", { repoPath });
+      setCommitPreflight(result);
+      setShowPreflight(true);
+    } catch (err) {
+      setMessage(`Preflight failed: ${err}`);
+    }
   }
 
   async function confirmSnapshot() {
@@ -1113,7 +1132,7 @@ export default function App() {
           >
             Ask LLM
           </button>
-          <button title={beginnerTitle("Review snapshot / Git commit\n\nOpens preflight before creating a commit. Only prepared files will be included.")} disabled={data.staged.length === 0} onClick={() => setShowPreflight(true)}>
+          <button title={beginnerTitle("Review snapshot / Git commit\n\nOpens preflight before creating a commit. Only prepared files will be included.")} disabled={data.staged.length === 0} onClick={openSnapshotPreflight}>
             Review snapshot / Git commit ({data.staged.length})
           </button>
           <ActionExplainButton
@@ -1232,6 +1251,16 @@ export default function App() {
           <div className="preflight-modal">
             <h2>Snapshot Preflight</h2>
             <p>You are about to create a Git snapshot. Only prepared files will be included.</p>
+
+            <div className="snapshot-boundary-box">
+              <h3>Next snapshot contains:</h3>
+              <div className="snapshot-boundary-grid">
+                <div><strong>{commitPreflight?.staged_files ?? data.staged.length}</strong><span>files</span></div>
+                <div><strong>+{commitPreflight?.insertions ?? 0}</strong><span>insertions</span></div>
+                <div><strong>-{commitPreflight?.deletions ?? 0}</strong><span>deletions</span></div>
+              </div>
+              <p>This creates a LOCAL snapshot only. It does not upload, push, or share anything.</p>
+            </div>
 
             <h3>Included files ({data.staged.length})</h3>
             <div className="preflight-list">

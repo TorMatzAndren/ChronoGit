@@ -50,6 +50,14 @@ struct CommitResult {
 }
 
 #[derive(Serialize)]
+struct CommitPreflight {
+    staged_files: usize,
+    insertions: i32,
+    deletions: i32,
+    is_empty: bool,
+}
+
+#[derive(Serialize)]
 struct HistoryCommit {
     hash: String,
     short_hash: String,
@@ -185,8 +193,15 @@ fn scan_git_repos(root: &std::path::Path, depth: usize, max_depth: usize, repos:
         if file_name == ".git"
             || file_name == "node_modules"
             || file_name == "target"
+            || file_name == "dist"
+            || file_name == "build"
             || file_name == ".cache"
             || file_name == ".local"
+            || file_name == ".cargo"
+            || file_name == ".rustup"
+            || file_name == ".npm"
+            || file_name == ".ollama"
+            || file_name == ".vscode"
         {
             continue;
         }
@@ -212,23 +227,51 @@ fn scan_git_repos(root: &std::path::Path, depth: usize, max_depth: usize, repos:
     }
 }
 
+fn discover_scan_roots() -> Vec<std::path::PathBuf> {
+    let mut roots = Vec::new();
+
+    if let Ok(raw) = std::env::var("CHRONOGIT_SCAN_ROOTS") {
+        for part in raw.split(':') {
+            let trimmed = part.trim();
+            if !trimmed.is_empty() {
+                roots.push(std::path::PathBuf::from(trimmed));
+            }
+        }
+    }
+
+    if let Ok(home) = std::env::var("HOME") {
+        for folder in [
+            "projects",
+            "Projects",
+            "dev",
+            "Dev",
+            "src",
+            "code",
+            "work",
+            "Documents",
+            "Desktop",
+            "Downloads",
+        ] {
+            roots.push(std::path::PathBuf::from(format!("{}/{}", home, folder)));
+        }
+
+        roots.push(std::path::PathBuf::from(home));
+    }
+
+    roots.push(std::path::PathBuf::from("/opt"));
+
+    roots.sort();
+    roots.dedup();
+    roots
+}
+
 #[tauri::command]
 fn discover_git_repos() -> Result<Vec<RepoInfo>, String> {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/dretski".to_string());
-
-    let roots = vec![
-        std::path::PathBuf::from(format!("{}/projects", home)),
-        std::path::PathBuf::from(format!("{}/jarri-benchmark-release", home)),
-        std::path::PathBuf::from(format!("{}/jarri-benchmark-release-test", home)),
-        std::path::PathBuf::from("/opt/jarri"),
-    ];
-
+    let roots = discover_scan_roots();
     let mut repos = Vec::new();
 
     for root in roots {
         if root.exists() && root.is_dir() {
-            scan_git_repos(&root, 0, 4, &mut repos);
-
             if root.join(".git").exists() {
                 let name = root
                     .file_name()
@@ -242,6 +285,14 @@ fn discover_git_repos() -> Result<Vec<RepoInfo>, String> {
                     root: root.to_string_lossy().to_string(),
                 });
             }
+
+            let max_depth = if root.to_string_lossy() == std::env::var("HOME").unwrap_or_default() {
+                2
+            } else {
+                5
+            };
+
+            scan_git_repos(&root, 0, max_depth, &mut repos);
         }
     }
 
@@ -517,6 +568,63 @@ fn git_unstage(repo_path: String, path: String) -> Result<String, String> {
 #[tauri::command]
 fn git_restore(repo_path: String, path: String) -> Result<String, String> {
     run_git_path_action(repo_path, vec!["restore"], path, "Restored")
+}
+
+
+#[tauri::command]
+fn git_commit_preflight(repo_path: String) -> Result<CommitPreflight, String> {
+    let files_out = Command::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .args(["diff", "--cached", "--name-only"])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !files_out.status.success() {
+        return Err(command_error("git diff --cached --name-only", &files_out));
+    }
+
+    let staged_files = String::from_utf8_lossy(&files_out.stdout)
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .count();
+
+    let stat_out = Command::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .args(["diff", "--cached", "--numstat"])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !stat_out.status.success() {
+        return Err(command_error("git diff --cached --numstat", &stat_out));
+    }
+
+    let mut insertions: i32 = 0;
+    let mut deletions: i32 = 0;
+
+    for line in String::from_utf8_lossy(&stat_out.stdout).lines() {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+
+        if parts.len() < 2 {
+            continue;
+        }
+
+        if let Ok(value) = parts[0].parse::<i32>() {
+            insertions += value;
+        }
+
+        if let Ok(value) = parts[1].parse::<i32>() {
+            deletions += value;
+        }
+    }
+
+    Ok(CommitPreflight {
+        staged_files,
+        insertions,
+        deletions,
+        is_empty: staged_files == 0,
+    })
 }
 
 #[tauri::command]
@@ -1249,6 +1357,7 @@ pub fn run() {
             discover_git_repos,
             git_remote_status,
             git_status,
+            git_commit_preflight,
             git_stage,
             git_unstage,
             git_restore,
