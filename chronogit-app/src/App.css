@@ -1519,3 +1519,81 @@ p {
 .button-with-help .status-refresh-button {
   flex: 1 1 auto;
 }
+
+/* Multi-repo selector + left-side local intelligence controls */
+.hero {
+  grid-template-columns: 1fr;
+}
+
+.hero-side {
+  display: grid !important;
+  grid-template-columns: minmax(300px, 1.2fr) minmax(300px, 1fr) 220px;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.repo-main-card,
+.llm-main-card {
+  border-radius: 10px;
+  padding: 9px;
+  background:
+    radial-gradient(circle at top left, rgba(100, 240, 200, 0.08), transparent 18rem),
+    rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(100, 240, 200, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.025);
+}
+
+.repo-main-card__title,
+.llm-main-card__title {
+  color: #64f0c8;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+}
+
+.repo-main-card__note,
+.llm-main-card__note {
+  color: #8f9aae;
+  font-size: 10px;
+  margin-top: 3px;
+  margin-bottom: 7px;
+}
+
+.repo-main-card select,
+.llm-main-card__controls select {
+  width: 100%;
+  min-height: 28px;
+  color-scheme: dark;
+  appearance: none;
+  -webkit-appearance: none;
+  background:
+    linear-gradient(180deg, rgba(100, 240, 200, 0.10), rgba(0, 0, 0, 0.38)),
+    #071014 !important;
+  color: #dfffee !important;
+  border: 1px solid rgba(100, 240, 200, 0.38) !important;
+  border-radius: 7px;
+  padding: 4px 8px;
+  font-size: 11px;
+}
+
+.repo-main-card select option,
+.llm-main-card__controls option {
+  background: #071014;
+  color: #dfffee;
+}
+
+.repo-main-card__path {
+  margin-top: 7px;
+  color: #aeb8c8;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 10px;
+  line-height: 1.3;
+  word-break: break-all;
+}
+
+@media (max-width: 1250px) {
+  .hero-side {
+    grid-template-columns: 1fr;
+  }
+}

@@ -18,6 +18,12 @@ type GitStatusResponse = {
   working: FileChange[];
 };
 
+type RepoInfo = {
+  path: string;
+  name: string;
+  root: string;
+};
+
 type CommitResult = {
   ok: boolean;
   message: string;
@@ -66,8 +72,6 @@ type LocalModel = {
   parameter_size: string;
   quantization_level: string;
 };
-
-const repoPath = "/home/dretski/projects/ChronoGit";
 
 function group(changes: FileChange[]) {
   const grouped: Record<string, FileChange[]> = {
@@ -213,11 +217,13 @@ type ConfirmAction = {
 };
 
 function Timeline({
+  repoPath,
   refreshTick,
   setConfirmAction,
   llmEngine,
   llmModel,
 }: {
+  repoPath: string;
   refreshTick: number;
   setConfirmAction: (action: ConfirmAction | null) => void;
   llmEngine: string;
@@ -469,6 +475,8 @@ export default function App() {
   const [showPreflight, setShowPreflight] = useState(false);
   const [commitMessage, setCommitMessage] = useState("");
   const [historyRefreshTick, setHistoryRefreshTick] = useState(0);
+  const [repoPath, setRepoPath] = useState(() => localStorage.getItem("chronogit_repo_path") || "/home/dretski/projects/ChronoGit");
+  const [repos, setRepos] = useState<RepoInfo[]>([]);
   const [llmEngine, setLlmEngine] = useState(() => localStorage.getItem("chronogit_llm_engine") || "ollama");
   const [llmModel, setLlmModel] = useState(() => localStorage.getItem("chronogit_llm_model") || "qwen3:8b");
   const [localModels, setLocalModels] = useState<LocalModel[]>([]);
@@ -479,10 +487,24 @@ export default function App() {
   const [uiExplainBusy, setUiExplainBusy] = useState(false);
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
 
-  async function refresh() {
-    const result = await invoke<GitStatusResponse>("git_status", { repoPath });
+  async function refresh(path = repoPath) {
+    const result = await invoke<GitStatusResponse>("git_status", { repoPath: path });
     setData(result);
     setLastRefresh(new Date().toLocaleTimeString());
+  }
+
+  async function loadRepos() {
+    try {
+      const result = await invoke<RepoInfo[]>("discover_git_repos");
+      setRepos(result);
+
+      if (result.length > 0 && !result.some((repo) => repo.path === repoPath)) {
+        setRepoPath(result[0].path);
+        localStorage.setItem("chronogit_repo_path", result[0].path);
+      }
+    } catch (err) {
+      setMessage(`Repository discovery failed: ${err}`);
+    }
   }
 
   useEffect(() => {
@@ -491,7 +513,14 @@ export default function App() {
       .catch((err) => setGitVersion(`Git error: ${err}`));
 
     refresh().catch((err) => setMessage(`Status error: ${err}`));
+    void loadRepos();
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem("chronogit_repo_path", repoPath);
+    refresh(repoPath).catch((err) => setMessage(`Status error: ${err}`));
+    setHistoryRefreshTick((value) => value + 1);
+  }, [repoPath]);
 
   useEffect(() => {
     localStorage.setItem("chronogit_llm_engine", llmEngine);
@@ -800,6 +829,32 @@ export default function App() {
         </div>
 
         <div className="hero-side">
+          <div className="repo-main-card">
+            <div className="repo-main-card__title">Repository</div>
+            <div className="repo-main-card__note">Select a discovered local Git project.</div>
+
+            <select
+              value={repoPath}
+              onChange={(event) => setRepoPath(event.target.value)}
+            >
+              {repos.length ? (
+                repos.map((repo) => (
+                  <option key={repo.path} value={repo.path}>
+                    {repo.name} · {repo.path}
+                  </option>
+                ))
+              ) : (
+                <option value={repoPath}>{repoPath}</option>
+              )}
+            </select>
+
+            <div className="repo-main-card__path">{repoPath}</div>
+
+            <button className="status-refresh-button" onClick={loadRepos}>
+              Scan repositories
+            </button>
+          </div>
+
           <div className="status-box">
             <div className="status-box__label">Git</div>
             <div>{gitVersion}</div>
@@ -1025,6 +1080,7 @@ export default function App() {
       ) : null}
 
       <Timeline
+        repoPath={repoPath}
         refreshTick={historyRefreshTick}
         setConfirmAction={setConfirmAction}
         llmEngine={llmEngine}

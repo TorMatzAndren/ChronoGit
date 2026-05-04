@@ -20,6 +20,14 @@ struct GitStatusResponse {
 }
 
 #[derive(Serialize)]
+struct RepoInfo {
+    path: String,
+    name: String,
+    root: String,
+}
+
+
+#[derive(Serialize)]
 struct CommitResult {
     ok: bool,
     message: String,
@@ -136,6 +144,96 @@ fn classify_change(index_status: char, worktree_status: char, path: &str, staged
         staged,
         explanation: explanation.to_string(),
     }
+}
+
+fn scan_git_repos(root: &std::path::Path, depth: usize, max_depth: usize, repos: &mut Vec<RepoInfo>) {
+    if depth > max_depth {
+        return;
+    }
+
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+
+        if !path.is_dir() {
+            continue;
+        }
+
+        let file_name = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("");
+
+        if file_name == ".git"
+            || file_name == "node_modules"
+            || file_name == "target"
+            || file_name == ".cache"
+            || file_name == ".local"
+        {
+            continue;
+        }
+
+        let git_dir = path.join(".git");
+        if git_dir.exists() {
+            let name = path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or("repo")
+                .to_string();
+
+            repos.push(RepoInfo {
+                path: path.to_string_lossy().to_string(),
+                name,
+                root: root.to_string_lossy().to_string(),
+            });
+
+            continue;
+        }
+
+        scan_git_repos(&path, depth + 1, max_depth, repos);
+    }
+}
+
+#[tauri::command]
+fn discover_git_repos() -> Result<Vec<RepoInfo>, String> {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/dretski".to_string());
+
+    let roots = vec![
+        std::path::PathBuf::from(format!("{}/projects", home)),
+        std::path::PathBuf::from(format!("{}/jarri-benchmark-release", home)),
+        std::path::PathBuf::from(format!("{}/jarri-benchmark-release-test", home)),
+        std::path::PathBuf::from("/opt/jarri"),
+    ];
+
+    let mut repos = Vec::new();
+
+    for root in roots {
+        if root.exists() && root.is_dir() {
+            scan_git_repos(&root, 0, 4, &mut repos);
+
+            if root.join(".git").exists() {
+                let name = root
+                    .file_name()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or("repo")
+                    .to_string();
+
+                repos.push(RepoInfo {
+                    path: root.to_string_lossy().to_string(),
+                    name,
+                    root: root.to_string_lossy().to_string(),
+                });
+            }
+        }
+    }
+
+    repos.sort_by(|a, b| a.path.cmp(&b.path));
+    repos.dedup_by(|a, b| a.path == b.path);
+
+    Ok(repos)
 }
 
 #[tauri::command]
@@ -1021,6 +1119,7 @@ pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             detect_git,
+            discover_git_repos,
             git_status,
             git_stage,
             git_unstage,
