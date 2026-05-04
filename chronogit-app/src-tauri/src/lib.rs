@@ -729,6 +729,130 @@ Required explanation focus:\n\
 }
 
 #[tauri::command]
+fn explain_context_with_ollama(
+    model: String,
+    kind: String,
+    title: String,
+    plain_text: String,
+    raw_truth: String,
+) -> Result<ExplainDiffResult, String> {
+    let local_models = list_local_llm_models("ollama".to_string())?;
+    if !local_models.iter().any(|local_model| local_model.name == model) {
+        return Err(format!("Model blocked or unavailable locally: {}", model));
+    }
+
+    let (tdp_before_watts, tdp_default_watts) = query_gpu_power_limits()?;
+
+    let default_limit = tdp_default_watts
+        .split_whitespace()
+        .next()
+        .ok_or("Could not parse GPU default power limit.")?
+        .parse::<f32>()
+        .map_err(|e| format!("Could not parse GPU default power limit: {}", e))?;
+
+    let active_limit = (default_limit * 0.60).round() as u32;
+    let reset_limit = default_limit.round() as u32;
+
+    let tdp_set_warning = set_gpu_power_limit(active_limit).err();
+
+    let clipped_plain: String = plain_text.chars().take(8000).collect();
+    let clipped_truth: String = raw_truth.chars().take(12000).collect();
+
+    let prompt = format!(
+        "/no_think\n\
+You are ChronoGit, a local-only Git learning assistant.\n\
+Return ONLY the final explanation. Do not include thinking, prelude, self-talk, or reasoning narration.\n\
+Explain this ChronoGit UI concept or action for a beginner, while keeping enough technical detail for an advanced developer.\n\
+Use this exact format:\n\
+Summary:\n\
+- ...\n\n\
+What it means:\n\
+- ...\n\n\
+Safe action guidance:\n\
+- ...\n\n\
+Risk notes:\n\
+- ...\n\n\
+Suggested review:\n\
+- ...\n\n\
+Hard rules:\n\
+- Do not invent context beyond the supplied UI context and raw truth.\n\
+- If something is not visible in the supplied context, say: not visible in this context.\n\
+- ChronoGit is local-only. Do not claim cloud behavior unless explicitly visible.\n\
+- Git truth and deterministic UI state are authoritative; the LLM explanation is advisory.\n\
+- Use ChronoGit UI terms first: 'Prepare for commit' instead of 'git add', 'Remove from next commit' instead of 'git restore --staged', and 'Restore / discard' for destructive working-folder restore.\n\
+- If raw truth says staged=false, do not say the file is staged or locally staged.\n\
+- If raw truth says staged=true, say it is prepared for the next commit.\n\
+- Do not recommend terminal commands unless the UI cannot perform the action.\n\
+- Never recommend `git reset --hard` unless the user explicitly asks for dangerous recovery commands.\n\
+- For Time Machine restore, say ChronoGit restores one selected file from one selected snapshot into the working folder and requires review before commit.\n\
+- Prefer explaining what the UI does over telling the user which raw Git command to run.\n\
+- Keep it practical and concise.\n\n\
+Metadata:\n\
+Kind: {}\n\
+Title: {}\n\n\
+User-facing context:\n{}\n\n\
+Raw truth:\n{}",
+        kind,
+        title,
+        clipped_plain,
+        clipped_truth
+    );
+
+    let request = OllamaGenerateRequest {
+        model: model.clone(),
+        prompt,
+        stream: false,
+    };
+
+    let response = reqwest::blocking::Client::new()
+        .post("http://127.0.0.1:11434/api/generate")
+        .json(&request)
+        .send()
+        .map_err(|e| {
+            let _ = set_gpu_power_limit(reset_limit);
+            format!("Could not call local Ollama API: {}", e)
+        })?;
+
+    let tdp_reset_warning = set_gpu_power_limit(reset_limit).err();
+    let (tdp_reset_watts, _) = query_gpu_power_limits().unwrap_or_else(|_| ("unknown".to_string(), tdp_default_watts.clone()));
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().unwrap_or_else(|_| "Could not read Ollama error body.".to_string());
+        return Err(format!("Ollama API failed with {}: {}", status, body));
+    }
+
+    let parsed: OllamaGenerateResponse = response
+        .json()
+        .map_err(|e| format!("Could not parse Ollama API response: {}", e))?;
+
+    if let Some(error) = parsed.error {
+        return Err(error);
+    }
+
+    let mut cleaned = clean_ollama_text(parsed.response.as_deref().unwrap_or(""));
+    if cleaned.is_empty() {
+        cleaned = "Local LLM finished, but returned no readable explanation.".to_string();
+    }
+
+    if let Some(warning) = tdp_set_warning {
+        cleaned = format!("[GPU TDP WARNING: could not set 60% power limit: {}]\n\n{}", warning, cleaned);
+    }
+
+    if let Some(warning) = tdp_reset_warning {
+        cleaned = format!("[GPU TDP WARNING: could not reset power limit: {}]\n\n{}", warning, cleaned);
+    }
+
+    Ok(ExplainDiffResult {
+        model,
+        explanation: cleaned,
+        tdp_before_watts,
+        tdp_active_watts: active_limit.to_string(),
+        tdp_reset_watts,
+    })
+}
+
+#[tauri::command]
 fn explain_diff_with_ollama(
     model: String,
     diff: String,
@@ -908,6 +1032,7 @@ pub fn run() {
             git_changed_files_from_commit,
             git_diff_file_from_commit,
             explain_diff_with_ollama,
+            explain_context_with_ollama,
             list_local_llm_models,
             git_restore_file_from_commit
         ])

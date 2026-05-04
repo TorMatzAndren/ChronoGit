@@ -50,6 +50,13 @@ type ExplainDiffResult = {
   tdp_reset_watts: string;
 };
 
+type ExplainContext = {
+  kind: string;
+  title: string;
+  plainText: string;
+  rawTruth: string;
+};
+
 type LocalModel = {
   name: string;
   engine: string;
@@ -465,6 +472,11 @@ export default function App() {
   const [llmEngine, setLlmEngine] = useState(() => localStorage.getItem("chronogit_llm_engine") || "ollama");
   const [llmModel, setLlmModel] = useState(() => localStorage.getItem("chronogit_llm_model") || "qwen3:8b");
   const [localModels, setLocalModels] = useState<LocalModel[]>([]);
+  const [uiExplainTitle, setUiExplainTitle] = useState("");
+  const [uiExplainStatus, setUiExplainStatus] = useState("");
+  const [uiExplainText, setUiExplainText] = useState("");
+  const [uiExplainOpen, setUiExplainOpen] = useState(false);
+  const [uiExplainBusy, setUiExplainBusy] = useState(false);
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
 
   async function refresh() {
@@ -585,6 +597,61 @@ export default function App() {
     }
   }
 
+  async function explainUiContext(context: ExplainContext) {
+    if (!llmModel) {
+      setMessage("Local LLM unavailable: no model selected.");
+      return;
+    }
+
+    try {
+      setUiExplainBusy(true);
+      setUiExplainTitle(context.title);
+      setUiExplainOpen(true);
+      setUiExplainStatus(`Local ${llmModel} is explaining: ${context.title}`);
+      setUiExplainText("Waiting for local LLM explanation...");
+
+      const result = await invoke<ExplainDiffResult>("explain_context_with_ollama", {
+        model: llmModel,
+        kind: context.kind,
+        title: context.title,
+        plainText: context.plainText,
+        rawTruth: context.rawTruth,
+      });
+
+      setUiExplainStatus(`Local ${result.model} finished. GPU TDP: ${result.tdp_before_watts}W → ${result.tdp_active_watts}W → ${result.tdp_reset_watts}W.`);
+      setUiExplainText(result.explanation || "Local LLM returned an empty explanation.");
+    } catch (err) {
+      setUiExplainStatus(`Local LLM explanation failed: ${err}`);
+      setUiExplainText("");
+    } finally {
+      setUiExplainBusy(false);
+    }
+  }
+
+  function ActionExplainButton({
+    title,
+    plainText,
+    rawTruth,
+    kind = "button",
+  }: {
+    title: string;
+    plainText: string;
+    rawTruth: string;
+    kind?: string;
+  }) {
+    return (
+      <button
+        type="button"
+        className="explain-action-button"
+        title={`Ask local LLM: ${title}`}
+        disabled={uiExplainBusy || !llmModel}
+        onClick={() => explainUiContext({ kind, title, plainText, rawTruth })}
+      >
+        ?
+      </button>
+    );
+  }
+
   function renderCard(change: FileChange) {
     const expanded = expandedPath === `${change.path}:${change.staged}`;
 
@@ -620,20 +687,54 @@ export default function App() {
             {expanded ? "Hide explanation" : "Explain"}
           </button>
 
+          <button
+            disabled={uiExplainBusy || !llmModel}
+            onClick={() => explainUiContext({
+              kind: "file_status",
+              title: `Explain file state: ${change.path}`,
+              plainText: `${plainStatus(change)}. Risk: ${change.risk}. ${change.explanation}`,
+              rawTruth: JSON.stringify(change, null, 2),
+            })}
+          >
+            Ask LLM
+          </button>
+
           {!change.staged ? (
-            <button disabled={busyPath === change.path} onClick={() => runAction("git_stage", change.path)}>
-              Prepare for commit
-            </button>
+            <>
+              <button disabled={busyPath === change.path} onClick={() => runAction("git_stage", change.path)}>
+                Prepare for commit
+              </button>
+              <ActionExplainButton
+                title="Explain Prepare for commit"
+                plainText="Prepare for commit means stage this file so it will be included in the next Git snapshot."
+                rawTruth={JSON.stringify(change, null, 2)}
+              />
+            </>
           ) : (
-            <button disabled={busyPath === change.path} onClick={() => runAction("git_unstage", change.path)}>
-              Remove from next commit
-            </button>
+            <>
+              <button disabled={busyPath === change.path} onClick={() => runAction("git_unstage", change.path)}>
+                Remove from next commit
+              </button>
+              <ActionExplainButton
+                title="Explain Remove from next commit"
+                plainText="Remove from next commit means unstage this file. It stays in the working folder, but will not be included if you commit now."
+                rawTruth={JSON.stringify(change, null, 2)}
+              />
+            </>
           )}
 
           {!change.staged && change.status !== "untracked" ? (
-            <button className="danger-button" disabled={busyPath === change.path} onClick={() => runAction("git_restore", change.path)}>
-              Restore / discard
-            </button>
+            <>
+              <button className="danger-button" disabled={busyPath === change.path} onClick={() => runAction("git_restore", change.path)}>
+                Restore / discard
+              </button>
+              <ActionExplainButton
+                title="Explain Restore / discard"
+                plainText="Restore / discard throws away this file's local working-folder changes and returns it to the last committed version."
+                rawTruth={JSON.stringify(change, null, 2)}
+                kind="destructive_button"
+              />
+            </>
           ) : null}
 
           {!change.staged && change.status === "untracked" ? (
@@ -641,9 +742,20 @@ export default function App() {
               <button className="danger-button" disabled={busyPath === change.path} onClick={() => runAction("git_remove_untracked", change.path)}>
                 Remove untracked file
               </button>
+              <ActionExplainButton
+                title="Explain Remove untracked file"
+                plainText="Remove untracked file deletes a file that is not in Git history. This is destructive because Git cannot restore it from a previous commit."
+                rawTruth={JSON.stringify(change, null, 2)}
+                kind="destructive_button"
+              />
               <button disabled={busyPath === change.path} onClick={() => runAction("git_ignore_path", change.path)}>
                 Add to .gitignore
               </button>
+              <ActionExplainButton
+                title="Explain Add to .gitignore"
+                plainText="Add to .gitignore tells Git to stop showing this untracked path in normal status output."
+                rawTruth={JSON.stringify(change, null, 2)}
+              />
             </>
           ) : null}
         </div>
@@ -695,9 +807,16 @@ export default function App() {
             <div>{data.branch}</div>
             <div className="status-box__label">State</div>
             <div>{lastRefresh || "not refreshed yet"}</div>
-            <button className="status-refresh-button" onClick={refreshAppState}>
-              Refresh app state
-            </button>
+            <div className="button-with-help">
+              <button className="status-refresh-button" onClick={refreshAppState}>
+                Refresh app state
+              </button>
+              <ActionExplainButton
+                title="Explain Refresh app state"
+                plainText="Refresh app state reloads ChronoGit's view of Git status and Time Machine history from local Git truth."
+                rawTruth="Refresh reads local repository status and history again. It does not change files."
+              />
+            </div>
           </div>
 
           <div className="llm-main-card">
@@ -740,9 +859,16 @@ export default function App() {
                 : "Model metadata unavailable"}
             </div>
 
-            <button className="status-refresh-button" onClick={() => loadLocalModels()}>
-              Scan installed models
-            </button>
+            <div className="button-with-help">
+              <button className="status-refresh-button" onClick={() => loadLocalModels()}>
+                Scan installed models
+              </button>
+              <ActionExplainButton
+                title="Explain Scan installed models"
+                plainText="Scan installed models asks the selected local LLM engine which models are available on this computer."
+                rawTruth="For Ollama, ChronoGit queries the local API at 127.0.0.1:11434/api/tags."
+              />
+            </div>
           </div>
         </div>
       </header>
@@ -769,6 +895,31 @@ export default function App() {
         </div>
       </section>
 
+      <section className="ui-explain-shortcuts">
+        <button
+          disabled={uiExplainBusy || !llmModel}
+          onClick={() => explainUiContext({
+            kind: "git_flow",
+            title: "Explain ChronoGit flow",
+            plainText: "ChronoGit presents Git as Working files → Prepared changes → Snapshot.",
+            rawTruth: "Working files are local disk changes. Prepared changes are staged files. Snapshot means Git commit.",
+          })}
+        >
+          Ask LLM: explain Git flow
+        </button>
+        <button
+          disabled={uiExplainBusy || !llmModel}
+          onClick={() => explainUiContext({
+            kind: "time_machine",
+            title: "Explain Time Machine",
+            plainText: "Time Machine lets users inspect earlier Git snapshots, changed files, file diffs, and restore selected files.",
+            rawTruth: "Snapshot list is commit history. Changed files are detected per selected snapshot. File diff shows the patch for one selected file. Restore only restores one selected file into the working folder; it does not commit automatically and does not reset the whole repository.",
+          })}
+        >
+          Ask LLM: explain Time Machine
+        </button>
+      </section>
+
       {message ? <div className="message">{message}</div> : null}
 
       <section className="preflight-card">
@@ -776,9 +927,36 @@ export default function App() {
           <h2>Commit Preflight</h2>
           <p>Jarri safety mode is active. ChronoGit reviews prepared files before any snapshot is created.</p>
         </div>
-        <button disabled={data.staged.length === 0} onClick={() => setShowPreflight(true)}>
-          Review snapshot / Git commit ({data.staged.length})
-        </button>
+        <div className="preflight-card__actions">
+          <button
+            disabled={uiExplainBusy || !llmModel}
+            onClick={() => explainUiContext({
+              kind: "preflight",
+              title: "Explain Snapshot Preflight",
+              plainText: "Snapshot Preflight reviews only files prepared for the next commit. Files still in the working folder are not included in the commit.",
+              rawTruth: JSON.stringify({
+                staged_count: data.staged.length,
+                working_count: data.working.length,
+                staged: data.staged,
+                rule: "Only staged (prepared) files will be included in the commit. Working-folder files are excluded."
+              }, null, 2),
+            })}
+          >
+            Ask LLM
+          </button>
+          <button disabled={data.staged.length === 0} onClick={() => setShowPreflight(true)}>
+            Review snapshot / Git commit ({data.staged.length})
+          </button>
+          <ActionExplainButton
+            title="Explain Review snapshot / Git commit"
+            plainText="Review snapshot opens the commit preflight. Only prepared files will be included in the Git commit."
+            rawTruth={JSON.stringify({
+              staged_count: data.staged.length,
+              working_count: data.working.length,
+              rule: "Only staged/prepared files are included in the commit."
+            }, null, 2)}
+          />
+        </div>
       </section>
 
       <section className="summary-grid">
@@ -813,6 +991,38 @@ export default function App() {
           {data.working.length ? renderGrouped(data.working) : <div className="empty">Working folder is clean.</div>}
         </div>
       </section>
+
+      {(uiExplainStatus || uiExplainText) ? (
+        <section className="ui-explain-panel">
+          <div className="ui-explain-panel__header">
+            <div>
+              <div className="ui-explain-panel__eyebrow">Local LLM · UI explanation</div>
+              <h2>{uiExplainTitle || "ChronoGit explanation"}</h2>
+            </div>
+            <div className="ui-explain-panel__actions">
+              <button onClick={() => setUiExplainOpen((value) => !value)}>
+                {uiExplainOpen ? "Hide explanation" : "Read explanation"}
+              </button>
+              {uiExplainText ? (
+                <button
+                  onClick={async () => {
+                    await navigator.clipboard.writeText(uiExplainText);
+                    setUiExplainStatus("UI explanation copied to clipboard.");
+                  }}
+                >
+                  Copy result
+                </button>
+              ) : null}
+            </div>
+          </div>
+
+          {uiExplainStatus ? <div className="ui-explain-panel__status">{uiExplainStatus}</div> : null}
+          <div className="ui-explain-panel__warning">
+            Local LLM output is advisory. ChronoGit UI state and Git output remain authoritative.
+          </div>
+          {uiExplainText && uiExplainOpen ? <pre>{uiExplainText}</pre> : null}
+        </section>
+      ) : null}
 
       <Timeline
         refreshTick={historyRefreshTick}

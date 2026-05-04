@@ -1411,3 +1411,111 @@ p {
     min-height: 260px;
   }
 }
+
+.ui-explain-shortcuts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+  padding: 7px 9px;
+  border: 1px solid rgba(100, 240, 200, 0.16);
+  background: rgba(100, 240, 200, 0.045);
+  border-radius: 10px;
+}
+
+.preflight-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.ui-explain-panel {
+  margin-bottom: 8px;
+  border: 1px solid rgba(100, 240, 200, 0.24);
+  background:
+    radial-gradient(circle at top left, rgba(100, 240, 200, 0.07), transparent 22rem),
+    rgba(0, 0, 0, 0.24);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.ui-explain-panel__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.ui-explain-panel__eyebrow {
+  color: #64f0c8;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  margin-bottom: 3px;
+}
+
+.ui-explain-panel__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ui-explain-panel__status {
+  padding: 8px 10px;
+  color: #ffd680;
+  font-size: 11px;
+  line-height: 1.35;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.ui-explain-panel__warning {
+  padding: 8px 10px;
+  color: #aeb8c8;
+  font-size: 11px;
+  line-height: 1.35;
+  background: rgba(255, 214, 128, 0.05);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.ui-explain-panel pre {
+  margin: 0;
+  padding: 10px;
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+  color: #d7dde7;
+  font-size: 12px;
+  line-height: 1.45;
+  font-family: Inter, system-ui, sans-serif;
+}
+
+.explain-action-button {
+  min-width: 24px;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 999px;
+  font-weight: 900;
+  color: #64f0c8;
+  background: rgba(100, 240, 200, 0.08);
+  border-color: rgba(100, 240, 200, 0.32);
+}
+
+.explain-action-button:hover:not(:disabled) {
+  background: rgba(100, 240, 200, 0.18);
+  box-shadow: 0 0 0 2px rgba(100, 240, 200, 0.08);
+}
+
+.button-with-help {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.button-with-help .status-refresh-button {
+  flex: 1 1 auto;
+}
