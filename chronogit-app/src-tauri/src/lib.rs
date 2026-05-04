@@ -20,6 +20,21 @@ struct GitStatusResponse {
 }
 
 #[derive(Serialize)]
+struct GitRemoteStatus {
+    repo_path: String,
+    branch: String,
+    upstream: Option<String>,
+    remote: Option<String>,
+    remote_url: Option<String>,
+    ahead: u32,
+    behind: u32,
+    has_remote: bool,
+    is_diverged: bool,
+    is_clean: bool,
+}
+
+
+#[derive(Serialize)]
 struct RepoInfo {
     path: String,
     name: String,
@@ -234,6 +249,118 @@ fn discover_git_repos() -> Result<Vec<RepoInfo>, String> {
     repos.dedup_by(|a, b| a.path == b.path);
 
     Ok(repos)
+}
+
+fn parse_remote_counts(status_line: &str) -> (u32, u32) {
+    let mut ahead = 0;
+    let mut behind = 0;
+
+    if let Some(start) = status_line.find('[') {
+        if let Some(end) = status_line[start..].find(']') {
+            let bracket = &status_line[start + 1..start + end];
+
+            for part in bracket.split(',') {
+                let trimmed = part.trim();
+
+                if let Some(value) = trimmed.strip_prefix("ahead ") {
+                    ahead = value.parse::<u32>().unwrap_or(0);
+                }
+
+                if let Some(value) = trimmed.strip_prefix("behind ") {
+                    behind = value.parse::<u32>().unwrap_or(0);
+                }
+            }
+        }
+    }
+
+    (ahead, behind)
+}
+
+#[tauri::command]
+fn git_remote_status(repo_path: String) -> Result<GitRemoteStatus, String> {
+    let status_out = Command::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .args(["status", "-sb"])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !status_out.status.success() {
+        return Err(command_error("git status -sb", &status_out));
+    }
+
+    let status_text = String::from_utf8_lossy(&status_out.stdout);
+    let status_line = status_text.lines().next().unwrap_or("## unknown").trim();
+
+    let mut branch = "unknown".to_string();
+    let mut upstream: Option<String> = None;
+
+    if let Some(rest) = status_line.strip_prefix("## ") {
+        let clean_rest = rest.split('[').next().unwrap_or(rest).trim();
+
+        if let Some((local, remote_branch)) = clean_rest.split_once("...") {
+            branch = local.trim().to_string();
+            let remote_branch = remote_branch.trim();
+            if !remote_branch.is_empty() {
+                upstream = Some(remote_branch.to_string());
+            }
+        } else {
+            branch = clean_rest.trim().to_string();
+        }
+    }
+
+    let (ahead, behind) = parse_remote_counts(status_line);
+
+    let remote = upstream
+        .as_ref()
+        .and_then(|value| value.split('/').next())
+        .map(|value| value.to_string());
+
+    let remote_out = Command::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .args(["remote", "-v"])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    let mut remote_url: Option<String> = None;
+
+    if remote_out.status.success() {
+        let remote_text = String::from_utf8_lossy(&remote_out.stdout);
+
+        for line in remote_text.lines() {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 3 && parts[2] == "(fetch)" {
+                if let Some(remote_name) = &remote {
+                    if parts[0] == remote_name {
+                        remote_url = Some(parts[1].to_string());
+                        break;
+                    }
+                }
+
+                if remote_url.is_none() {
+                    remote_url = Some(parts[1].to_string());
+                }
+            }
+        }
+    }
+
+    let has_remote = upstream.is_some() || remote_url.is_some();
+    let is_diverged = ahead > 0 && behind > 0;
+    let is_clean = has_remote && ahead == 0 && behind == 0;
+
+    Ok(GitRemoteStatus {
+        repo_path,
+        branch,
+        upstream,
+        remote,
+        remote_url,
+        ahead,
+        behind,
+        has_remote,
+        is_diverged,
+        is_clean,
+    })
 }
 
 #[tauri::command]
@@ -1120,6 +1247,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             detect_git,
             discover_git_repos,
+            git_remote_status,
             git_status,
             git_stage,
             git_unstage,

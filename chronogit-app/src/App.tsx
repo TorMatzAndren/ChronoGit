@@ -24,6 +24,19 @@ type RepoInfo = {
   root: string;
 };
 
+type GitRemoteStatus = {
+  repo_path: string;
+  branch: string;
+  upstream: string | null;
+  remote: string | null;
+  remote_url: string | null;
+  ahead: number;
+  behind: number;
+  has_remote: boolean;
+  is_diverged: boolean;
+  is_clean: boolean;
+};
+
 type CommitResult = {
   ok: boolean;
   message: string;
@@ -72,6 +85,47 @@ type LocalModel = {
   parameter_size: string;
   quantization_level: string;
 };
+
+
+function remoteStateLabel(remote: GitRemoteStatus | null) {
+  if (!remote || !remote.has_remote) return "LOCAL ONLY";
+  if (remote.is_diverged) return "DIVERGED";
+  if (remote.ahead > 0) return "AHEAD";
+  if (remote.behind > 0) return "BEHIND";
+  return "IN SYNC";
+}
+
+function remoteStateClass(remote: GitRemoteStatus | null) {
+  return remoteStateLabel(remote).toLowerCase().replaceAll(" ", "-");
+}
+
+function remoteTruthText(remote: GitRemoteStatus | null) {
+  if (!remote || !remote.has_remote) return "LOCAL";
+  if (remote.is_diverged) return `+${remote.ahead}/-${remote.behind}`;
+  if (remote.ahead > 0) return `+${remote.ahead}`;
+  if (remote.behind > 0) return `-${remote.behind}`;
+  return "SYNC";
+}
+
+function explainRemoteHuman(remote: GitRemoteStatus | null) {
+  if (!remote || !remote.has_remote) {
+    return "This project is local-only right now. Commits stay on this computer unless a remote is later added and pushed.";
+  }
+
+  if (remote.is_diverged) {
+    return "Both your local branch and the remote have commits the other side does not have.";
+  }
+
+  if (remote.ahead > 0) {
+    return "You have local commits that are not uploaded to the remote.";
+  }
+
+  if (remote.behind > 0) {
+    return "The remote has commits that you do not have locally yet.";
+  }
+
+  return "Your local branch and its remote tracking branch are in sync.";
+}
 
 function group(changes: FileChange[]) {
   const grouped: Record<string, FileChange[]> = {
@@ -477,6 +531,8 @@ export default function App() {
   const [historyRefreshTick, setHistoryRefreshTick] = useState(0);
   const [repoPath, setRepoPath] = useState(() => localStorage.getItem("chronogit_repo_path") || "/home/dretski/projects/ChronoGit");
   const [repos, setRepos] = useState<RepoInfo[]>([]);
+  const [remoteStatus, setRemoteStatus] = useState<GitRemoteStatus | null>(null);
+  const [beginnerMode, setBeginnerMode] = useState(() => localStorage.getItem("chronogit_beginner_mode") !== "off");
   const [llmEngine, setLlmEngine] = useState(() => localStorage.getItem("chronogit_llm_engine") || "ollama");
   const [llmModel, setLlmModel] = useState(() => localStorage.getItem("chronogit_llm_model") || "qwen3:8b");
   const [localModels, setLocalModels] = useState<LocalModel[]>([]);
@@ -488,8 +544,13 @@ export default function App() {
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
 
   async function refresh(path = repoPath) {
-    const result = await invoke<GitStatusResponse>("git_status", { repoPath: path });
-    setData(result);
+    const [statusResult, remoteResult] = await Promise.all([
+      invoke<GitStatusResponse>("git_status", { repoPath: path }),
+      invoke<GitRemoteStatus>("git_remote_status", { repoPath: path }),
+    ]);
+
+    setData(statusResult);
+    setRemoteStatus(remoteResult);
     setLastRefresh(new Date().toLocaleTimeString());
   }
 
@@ -530,6 +591,10 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem("chronogit_llm_model", llmModel);
   }, [llmModel]);
+
+  useEffect(() => {
+    localStorage.setItem("chronogit_beginner_mode", beginnerMode ? "on" : "off");
+  }, [beginnerMode]);
 
   async function executeAction(action: "git_stage" | "git_unstage" | "git_restore" | "git_remove_untracked" | "git_ignore_path", path: string) {
     try {
@@ -660,24 +725,22 @@ export default function App() {
   function ActionExplainButton({
     title,
     plainText,
-    rawTruth,
-    kind = "button",
   }: {
     title: string;
     plainText: string;
-    rawTruth: string;
+    rawTruth?: string;
     kind?: string;
   }) {
+    if (!beginnerMode) return null;
+
     return (
-      <button
-        type="button"
+      <span
         className="explain-action-button"
-        title={`Ask local LLM: ${title}`}
-        disabled={uiExplainBusy || !llmModel}
-        onClick={() => explainUiContext({ kind, title, plainText, rawTruth })}
+        title={`${title}\n\n${plainText}`}
+        aria-label={title}
       >
         ?
-      </button>
+      </span>
     );
   }
 
@@ -829,6 +892,21 @@ export default function App() {
         </div>
 
         <div className="hero-side">
+          <div className="beginner-main-card">
+            <div className="beginner-main-card__title">Mode</div>
+            <button
+              className={`beginner-toggle ${beginnerMode ? "beginner-toggle--on" : "beginner-toggle--off"}`}
+              onClick={() => setBeginnerMode((value) => !value)}
+            >
+              Beginner mode: {beginnerMode ? "ON" : "OFF"}
+            </button>
+            <div className="beginner-main-card__note">
+              {beginnerMode
+                ? "Shows teaching hints, hover help, and plain-language Git meaning."
+                : "Compact expert view. Raw Git truth stays visible."}
+            </div>
+          </div>
+
           <div className="repo-main-card">
             <div className="repo-main-card__title">Repository</div>
             <div className="repo-main-card__note">Select a discovered local Git project.</div>
@@ -871,6 +949,23 @@ export default function App() {
                 plainText="Refresh app state reloads ChronoGit's view of Git status and Time Machine history from local Git truth."
                 rawTruth="Refresh reads local repository status and history again. It does not change files."
               />
+            </div>
+          </div>
+
+          <div className={`remote-main-card remote-main-card--${remoteStateClass(remoteStatus)}`}>
+            <div className="remote-main-card__title">Remote</div>
+            <div className="remote-main-card__state">{remoteStateLabel(remoteStatus)}</div>
+            <div className="remote-main-card__line">
+              Branch: <span>{remoteStatus?.branch || data.branch}</span>
+            </div>
+            <div className="remote-main-card__line">
+              Upstream: <span>{remoteStatus?.upstream || "none"}</span>
+            </div>
+            <div className="remote-main-card__line">
+              Ahead / behind: <span>+{remoteStatus?.ahead ?? 0} / -{remoteStatus?.behind ?? 0}</span>
+            </div>
+            <div className="remote-main-card__url">
+              {remoteStatus?.remote_url || "No remote URL detected"}
             </div>
           </div>
 
@@ -928,10 +1023,25 @@ export default function App() {
         </div>
       </header>
 
-      <section className="learning-note">
-        <strong>Beginner rule:</strong> Preparing a file does not commit it. It only marks it for the next snapshot.
-        Removing a file from the next commit does not delete it. Restore/discard is the dangerous action.
+      {beginnerMode ? (
+        <section className="learning-note">
+          <strong>Beginner rule:</strong> Preparing a file does not commit it. It only marks it for the next snapshot.
+          Removing a file from the next commit does not delete it. Restore/discard is the dangerous action.
+        </section>
+      ) : null}
+
+      <section className={`truth-strip truth-strip--${remoteStateClass(remoteStatus)}`}>
+        <div title="Working-folder changes are files changed on disk but not prepared for the next commit."><strong>Working</strong><span>{data.working.length}</span></div>
+        <div title="Prepared changes are staged files that will be included if you commit now."><strong>Prepared</strong><span>{data.staged.length}</span></div>
+        <div title="Remote shows whether your local branch is synced with its remote tracking branch."><strong>Remote</strong><span>{remoteTruthText(remoteStatus)}</span></div>
+        <div title="State summarizes the local/remote relationship."><strong>State</strong><span>{remoteStateLabel(remoteStatus)}</span></div>
       </section>
+
+      {beginnerMode ? (
+        <section className="truth-meaning">
+          <strong>Remote meaning:</strong> {explainRemoteHuman(remoteStatus)}
+        </section>
+      ) : null}
 
       <section className="flow-strip">
         <div className="flow-step">
