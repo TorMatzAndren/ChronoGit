@@ -89,6 +89,12 @@ type CommitComparison = {
   diff: string;
 };
 
+type FocusProjection =
+  | { kind: "none" }
+  | { kind: "commit"; commit: HistoryCommit }
+  | { kind: "file"; commit: HistoryCommit; file: ChangedFile }
+  | { kind: "comparison"; comparison: CommitComparison };
+
 type RemotePullResult = {
   ok: boolean;
   message: string;
@@ -531,6 +537,7 @@ function Timeline({
   const [diff, setDiff] = useState("");
   const [compareBase, setCompareBase] = useState<HistoryCommit | null>(null);
   const [comparison, setComparison] = useState<CommitComparison | null>(null);
+  const [focusProjection, setFocusProjection] = useState<FocusProjection>({ kind: "none" });
   const [explainText, setExplainText] = useState("");
   const [explainStatus, setExplainStatus] = useState("");
   const [explainOpen, setExplainOpen] = useState(false);
@@ -556,6 +563,7 @@ function Timeline({
       setSelected(commit);
       setSelectedFile(null);
       setComparison(null);
+      setFocusProjection({ kind: "commit", commit });
       setDiff("Select a changed file to view its diff, or choose A ↔ B comparison.");
       setExplainText("");
       setExplainStatus("");
@@ -605,6 +613,7 @@ function Timeline({
       });
 
       setComparison(result);
+      setFocusProjection({ kind: "comparison", comparison: result });
       setDiff(result.diff.trim() || "No diff between these two snapshots.");
       setError("");
     } catch (err) {
@@ -649,6 +658,7 @@ function Timeline({
   function clearComparison() {
     setCompareBase(null);
     setComparison(null);
+    setFocusProjection(selected ? { kind: "commit", commit: selected } : { kind: "none" });
     setSelectedFile(null);
     setDiff(selected ? "Select a changed file to view its diff, or choose A ↔ B comparison." : "");
   }
@@ -658,6 +668,7 @@ function Timeline({
 
     try {
       setSelectedFile(file);
+      setFocusProjection({ kind: "file", commit: selected, file });
       setDiff("Loading file diff...");
       setExplainText("");
       setExplainStatus("");
@@ -752,6 +763,19 @@ function Timeline({
       </div>
 
       {error ? <div className="message">{error}</div> : null}
+
+      <div className={`focus-projection focus-projection--${focusProjection.kind}`}>
+        <strong>Focus</strong>
+        <span>
+          {focusProjection.kind === "comparison"
+            ? `Comparing ${focusProjection.comparison.left_label} → ${focusProjection.comparison.right_label}`
+            : focusProjection.kind === "file"
+              ? `Inspecting ${focusProjection.file.path} in ${focusProjection.commit.short_hash}`
+              : focusProjection.kind === "commit"
+                ? `Inspecting snapshot ${focusProjection.commit.short_hash} — ${focusProjection.commit.message}`
+                : "No focused inspection selected yet."}
+        </span>
+      </div>
 
       <div className="comparison-toolbar">
         <div>

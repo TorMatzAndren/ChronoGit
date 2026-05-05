@@ -3022,3 +3022,59 @@ p {
     grid-template-columns: 1fr;
   }
 }
+
+
+/* ChronoGit Focus Projection seed */
+.focus-projection {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: baseline;
+  margin-bottom: 8px;
+  padding: 7px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(117, 183, 255, 0.18);
+  background:
+    radial-gradient(circle at top left, rgba(117, 183, 255, 0.06), transparent 18rem),
+    rgba(0, 0, 0, 0.22);
+}
+
+.focus-projection strong {
+  color: #75b7ff;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.focus-projection span {
+  color: #d7dde7;
+  font-size: 11px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.focus-projection--comparison {
+  border-color: rgba(100, 240, 200, 0.28);
+  background:
+    radial-gradient(circle at top left, rgba(100, 240, 200, 0.08), transparent 18rem),
+    rgba(0, 0, 0, 0.24);
+}
+
+.focus-projection--comparison strong {
+  color: #64f0c8;
+}
+
+.focus-projection--file {
+  border-color: rgba(255, 214, 128, 0.24);
+}
+
+.focus-projection--file strong {
+  color: #ffd680;
+}
+
+@media (max-width: 900px) {
+  .focus-projection {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

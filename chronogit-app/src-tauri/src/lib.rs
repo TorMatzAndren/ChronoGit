@@ -2130,6 +2130,9 @@ Hard rules:\n\
 - Prioritize the biggest code movements and user-visible behavior changes.\n\
 - Mention safety, mutation, Git state, LLM behavior, or UI consequence only when visible in changed lines.\n\
 - This is A ↔ B comparison, not necessarily one single commit.\n\
+- Do NOT say a function, feature, command, or UI path was replaced unless the diff explicitly removes the old one or reroutes all callers.\n\
+- Classify each important change as one of: additive, modifying existing behavior, replacing existing behavior, removing behavior.\n\
+- If both old and new functions remain visible, call the change additive or specialized, not replacement.\n\
 - Git diff is authoritative. This explanation is advisory.\n\n\
 Comparison metadata:\n\
 A: {}\n\
