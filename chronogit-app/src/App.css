@@ -3235,3 +3235,28 @@ p {
     box-shadow: none;
   }
 }
+
+
+/* Focused diff line selection */
+.diff-line--selectable {
+  cursor: pointer;
+}
+
+.diff-line--selectable:hover {
+  outline: 1px solid rgba(100, 240, 200, 0.22);
+  outline-offset: -1px;
+}
+
+.diff-line--selected {
+  background:
+    linear-gradient(90deg, rgba(255, 214, 128, 0.35), rgba(100, 240, 200, 0.15)) !important;
+  border-left-color: #ffd680 !important;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 214, 128, 0.55);
+}
+
+/* small, non-intrusive indicator */
+.diff-line--selected .diff-line__num {
+  color: #ffd680;
+  font-weight: 900;
+}

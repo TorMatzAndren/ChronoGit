@@ -468,7 +468,11 @@ function diffLineClass(line: string): string {
   return "diff-line";
 }
 
-function renderPrettyDiff(diff: string) {
+function renderPrettyDiff(
+  diff: string,
+  selectedLines: Set<number> = new Set(),
+  onToggleLine?: (lineNumber: number) => void,
+) {
   if (!diff || !diff.trim()) {
     return <div className="diff-placeholder">No diff for this file.</div>;
   }
@@ -477,12 +481,22 @@ function renderPrettyDiff(diff: string) {
 
   return (
     <div className="diff-pretty">
-      {lines.map((line, index) => (
-        <div className={diffLineClass(line)} key={`${index}-${line.slice(0, 24)}`}>
-          <span className="diff-line__num">{index + 1}</span>
-          <code className="diff-line__text">{line || " "}</code>
-        </div>
-      ))}
+      {lines.map((line, index) => {
+        const lineNumber = index + 1;
+        const selected = selectedLines.has(lineNumber);
+
+        return (
+          <div
+            className={`${diffLineClass(line)} ${selected ? "diff-line--selected" : ""} ${onToggleLine ? "diff-line--selectable" : ""}`}
+            key={`${index}-${line.slice(0, 24)}`}
+            onClick={onToggleLine ? () => onToggleLine(lineNumber) : undefined}
+            title={onToggleLine ? "Click to select this complete diff hunk for focused copy/explanation." : undefined}
+          >
+            <span className="diff-line__num">{lineNumber}</span>
+            <code className="diff-line__text">{line || " "}</code>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -540,6 +554,7 @@ function Timeline({
   const [compareBase, setCompareBase] = useState<HistoryCommit | null>(null);
   const [comparison, setComparison] = useState<CommitComparison | null>(null);
   const [focusProjection, setFocusProjection] = useState<FocusProjection>({ kind: "none" });
+  const [selectedDiffLines, setSelectedDiffLines] = useState<Set<number>>(new Set());
   const [explainText, setExplainText] = useState("");
   const [explainStatus, setExplainStatus] = useState("");
   const [explainOpen, setExplainOpen] = useState(false);
@@ -569,6 +584,7 @@ function Timeline({
       setSelected(commit);
       setSelectedFile(null);
       setComparison(null);
+      setSelectedDiffLines(new Set());
       setFocusProjection({ kind: "commit", commit });
       setDiff("Select a changed file to view its diff, or choose A ↔ B comparison.");
       setExplainText("");
@@ -611,6 +627,7 @@ function Timeline({
       setExplainStatus("");
       setExplainOpen(false);
       setSelectedFile(null);
+      setSelectedDiffLines(new Set());
       setDiff("Loading A ↔ B comparison...");
       const result = await invoke<CommitComparison>("git_compare_commits", {
         repoPath,
@@ -626,6 +643,138 @@ function Timeline({
       setComparison(null);
       setDiff("");
       setError(`A ↔ B comparison failed: ${err}`);
+    }
+  }
+
+  function hunkLineNumbersForLine(lineNumber: number) {
+    if (!diff.trim()) return [lineNumber];
+
+    const lines = diff.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+    const index = lineNumber - 1;
+
+    if (index < 0 || index >= lines.length) return [lineNumber];
+
+    let hunkStart = index;
+    while (hunkStart >= 0) {
+      const line = lines[hunkStart] || "";
+      if (line.startsWith("@@")) break;
+      if (line.startsWith("diff --git")) return [lineNumber];
+      hunkStart -= 1;
+    }
+
+    if (hunkStart < 0 || !lines[hunkStart]?.startsWith("@@")) {
+      return [lineNumber];
+    }
+
+    let hunkEnd = hunkStart;
+    while (hunkEnd + 1 < lines.length) {
+      const next = lines[hunkEnd + 1] || "";
+      if (next.startsWith("@@") || next.startsWith("diff --git")) break;
+      hunkEnd += 1;
+    }
+
+    const numbers: number[] = [];
+    for (let current = hunkStart + 1; current <= hunkEnd + 1; current += 1) {
+      numbers.push(current);
+    }
+
+    return numbers;
+  }
+
+  function toggleDiffLine(lineNumber: number) {
+    const hunkLines = hunkLineNumbersForLine(lineNumber);
+
+    setSelectedDiffLines((current) => {
+      const next = new Set(current);
+      const fullySelected = hunkLines.every((line) => next.has(line));
+
+      for (const line of hunkLines) {
+        if (fullySelected) next.delete(line);
+        else next.add(line);
+      }
+
+      return next;
+    });
+  }
+
+  function selectedDiffText() {
+    if (!diff.trim() || selectedDiffLines.size === 0) return "";
+
+    const lines = diff.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+    return [...selectedDiffLines]
+      .sort((left, right) => left - right)
+      .map((lineNumber) => `${lineNumber}: ${lines[lineNumber - 1] ?? ""}`)
+      .join("\n");
+  }
+
+  async function copySelectedDiffLines() {
+
+
+
+    const selectedText = selectedDiffText();
+    if (!selectedText.trim()) return;
+
+    await navigator.clipboard.writeText(selectedText);
+    setExplainStatus(`Copied ${selectedDiffLines.size} selected diff line(s).`);
+  }
+
+  async function explainSelectedDiffLines() {
+    const selectedText = selectedDiffText();
+    if (!selectedText.trim()) {
+      setError("Selected diff explanation blocked: no diff lines selected.");
+      return;
+    }
+
+    try {
+      setExplainBusy(true);
+      setExplainStatus(`Local ${llmModel} is explaining ${selectedDiffLines.size} selected diff line(s)...`);
+
+      appendLlmEntry({
+        source: "diff",
+        model: llmModel,
+        title: "Selected diff explanation started",
+        content: `Explaining ${selectedDiffLines.size} selected diff line(s). Waiting for local model response...`,
+      });
+
+      const focusTitle = comparison
+        ? `Selected lines from A ↔ B: ${comparison.left_label} → ${comparison.right_label}`
+        : selectedFile
+          ? `Selected lines from ${selectedFile.path}`
+          : "Selected diff lines";
+
+      const result = await invoke<ExplainDiffResult>("explain_diff_with_ollama", {
+        model: llmModel,
+        diff: [
+          "CHRONOGIT SELECTED DIFF LINES ONLY",
+          "This is a selected subset of a larger diff.",
+          "Explain only the selected lines. Do not infer hidden context.",
+          "",
+          selectedText,
+        ].join("\n"),
+        filePath: selectedFile?.path || "selected-diff-lines.patch",
+        commitHash: selected?.short_hash ?? comparison?.right_label ?? "selection",
+        commitMessage: focusTitle,
+      });
+
+      setExplainStatus(`Local ${result.model} finished explaining selected lines.`);
+      appendLlmEntry({
+        source: "diff",
+        model: result.model,
+        title: focusTitle,
+        content: result.explanation || "LLM returned empty selected-line explanation.",
+      });
+
+      setError("");
+    } catch (err) {
+      appendLlmEntry({
+        source: "diff",
+        model: llmModel,
+        title: "Selected diff explanation failed",
+        content: String(err),
+      });
+      setError(`Selected diff explanation failed: ${err}`);
+    } finally {
+      setExplainBusy(false);
     }
   }
 
@@ -674,6 +823,7 @@ function Timeline({
 
     try {
       setSelectedFile(file);
+      setSelectedDiffLines(new Set());
       setFocusProjection({ kind: "file", commit: selected, file });
       setDiff("Loading file diff...");
       setExplainText("");
@@ -920,6 +1070,12 @@ function Timeline({
                   {explainBusy ? `${llmModel} is thinking...` : `Ask ${llmModel} to explain A ↔ B`}
                 </button>
                 <button
+                  disabled={selectedDiffLines.size === 0}
+                  onClick={explainSelectedDiffLines}
+                >
+                  Explain selected hunk lines ({selectedDiffLines.size})
+                </button>
+                <button
                   disabled={!comparison.diff.trim()}
                   onClick={async () => {
                     await navigator.clipboard.writeText(comparison.diff);
@@ -936,6 +1092,19 @@ function Timeline({
                 <button onClick={explainSelectedDiff} disabled={explainBusy || !diff.trim() || !llmModel}>
                   {explainBusy ? `${llmModel} is thinking...` : `Ask ${llmModel} to explain this diff`}
                 </button>
+                <button
+                  disabled={selectedDiffLines.size === 0}
+                  onClick={copySelectedDiffLines}
+                >
+                  Copy selected hunk lines ({selectedDiffLines.size})
+                </button>
+                <button
+                  disabled={selectedDiffLines.size === 0 || explainBusy || !llmModel}
+                  onClick={explainSelectedDiffLines}
+                >
+                  {explainBusy ? `${llmModel} is thinking...` : `Explain selected hunk lines (${selectedDiffLines.size})`}
+                </button>
+
                 <button className="danger-button" onClick={restoreSelectedFile}>
                   Restore this file from selected snapshot
                 </button>
@@ -972,7 +1141,7 @@ function Timeline({
             </div>
           ) : null}
 
-          {selected ? renderPrettyDiff(diff) : <div className="diff-placeholder">Select a snapshot to inspect changed files.</div>}
+          {selected ? renderPrettyDiff(diff, selectedDiffLines, toggleDiffLine) : <div className="diff-placeholder">Select a snapshot to inspect changed files.</div>}
         </div>
       </div>
     </section>
