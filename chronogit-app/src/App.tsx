@@ -78,6 +78,17 @@ type DiffResult = {
   diff: string;
 };
 
+type CommitComparison = {
+  left_commit: string;
+  right_commit: string;
+  left_label: string;
+  right_label: string;
+  changed_files: ChangedFile[];
+  insertions: number;
+  deletions: number;
+  diff: string;
+};
+
 type RemotePullResult = {
   ok: boolean;
   message: string;
@@ -518,6 +529,8 @@ function Timeline({
   const [changedFiles, setChangedFiles] = useState<ChangedFile[]>([]);
   const [selectedFile, setSelectedFile] = useState<ChangedFile | null>(null);
   const [diff, setDiff] = useState("");
+  const [compareBase, setCompareBase] = useState<HistoryCommit | null>(null);
+  const [comparison, setComparison] = useState<CommitComparison | null>(null);
   const [explainText, setExplainText] = useState("");
   const [explainStatus, setExplainStatus] = useState("");
   const [explainOpen, setExplainOpen] = useState(false);
@@ -542,7 +555,8 @@ function Timeline({
     try {
       setSelected(commit);
       setSelectedFile(null);
-      setDiff("Select a changed file to view its diff.");
+      setComparison(null);
+      setDiff("Select a changed file to view its diff, or choose A ↔ B comparison.");
       setExplainText("");
       setExplainStatus("");
       setExplainOpen(false);
@@ -559,6 +573,91 @@ function Timeline({
       setDiff("");
       setError(`Changed-file list failed: ${err}`);
     }
+  }
+
+  function markCompareBase() {
+    if (!selected) return;
+
+    setCompareBase(selected);
+    setComparison(null);
+    setSelectedFile(null);
+    setDiff(`Comparison base selected: ${selected.short_hash} — ${selected.message}\n\nNow select another snapshot and click “Compare to selected”.`);
+  }
+
+  async function compareToSelected() {
+    if (!compareBase || !selected) return;
+
+    if (compareBase.hash === selected.hash) {
+      setError("A ↔ B comparison needs two different snapshots.");
+      return;
+    }
+
+    try {
+      setExplainText("");
+      setExplainStatus("");
+      setExplainOpen(false);
+      setSelectedFile(null);
+      setDiff("Loading A ↔ B comparison...");
+      const result = await invoke<CommitComparison>("git_compare_commits", {
+        repoPath,
+        leftCommit: compareBase.hash,
+        rightCommit: selected.hash,
+      });
+
+      setComparison(result);
+      setDiff(result.diff.trim() || "No diff between these two snapshots.");
+      setError("");
+    } catch (err) {
+      setComparison(null);
+      setDiff("");
+      setError(`A ↔ B comparison failed: ${err}`);
+    }
+  }
+
+  async function explainComparison() {
+    if (!comparison || !comparison.diff.trim()) return;
+
+    try {
+      setExplainBusy(true);
+      setExplainStatus(`Local ${llmModel} is explaining A ↔ B comparison.`);
+      const result = await invoke<ExplainDiffResult>("explain_context_with_ollama", {
+        model: llmModel,
+        kind: "comparison",
+        title: `Explain A ↔ B comparison: ${comparison.left_label} → ${comparison.right_label}`,
+        plainText: [
+          `Comparison: ${comparison.left_label} → ${comparison.right_label}`,
+          `Changed files: ${comparison.changed_files.length}`,
+          `Insertions: ${comparison.insertions}`,
+          `Deletions: ${comparison.deletions}`,
+          "",
+          "This is a direct comparison between two selected Git snapshots, not necessarily a single commit patch.",
+        ].join("\n"),
+        rawTruth: JSON.stringify({
+          comparison,
+          rule: "Git diff between selected commit A and selected commit B is authoritative. LLM explanation is advisory only.",
+        }, null, 2),
+      });
+
+      setExplainStatus(`Local ${result.model} finished. GPU TDP: ${result.tdp_before_watts}W → ${result.tdp_active_watts}W → ${result.tdp_reset_watts}W.`);
+      appendLlmEntry({
+        source: "diff",
+        model: result.model,
+        title: `A ↔ B comparison: ${comparison.left_label} → ${comparison.right_label}`,
+        content: result.explanation || "Local LLM returned an empty explanation.",
+      });
+      setError("");
+    } catch (err) {
+      setError(`A ↔ B LLM explanation failed: ${err}`);
+    } finally {
+      setExplainBusy(false);
+    }
+  }
+
+  function clearComparison() {
+    setCompareBase(null);
+    setComparison(null);
+    setSelectedFile(null);
+    setDiff(selected ? "Select a changed file to view its diff, or choose A ↔ B comparison." : "");
   }
 
   async function selectFile(file: ChangedFile) {
@@ -661,6 +760,29 @@ function Timeline({
 
       {error ? <div className="message">{error}</div> : null}
 
+      <div className="comparison-toolbar">
+        <div>
+          <strong>A ↔ B comparison</strong>
+          <span>
+            {compareBase
+              ? `A is ${compareBase.short_hash} — ${compareBase.message}`
+              : "Choose a snapshot as A, then compare another snapshot as B."}
+          </span>
+        </div>
+
+        <div className="comparison-toolbar__actions">
+          <button disabled={!selected} onClick={markCompareBase}>
+            Compare from here
+          </button>
+          <button disabled={!compareBase || !selected || compareBase.hash === selected?.hash} onClick={compareToSelected}>
+            Compare to selected
+          </button>
+          <button disabled={!compareBase && !comparison} onClick={clearComparison}>
+            Clear comparison
+          </button>
+        </div>
+      </div>
+
       <div className="timeline-layout timeline-layout--three">
         <div className="timeline-list">
           {history.map((commit) => (
@@ -703,27 +825,47 @@ function Timeline({
 
         <div className="diff-viewer">
           <div className="diff-title">
-            {selectedFile ? `File diff: ${selectedFile.path}` : "No file selected"}
+            {comparison
+              ? `A ↔ B comparison: ${comparison.left_label} → ${comparison.right_label}`
+              : selectedFile
+                ? `File diff: ${selectedFile.path}`
+                : "No file selected"}
           </div>
 
           {selected ? (
             <div className="diff-scope-card">
               <div>
                 <strong>Diff scope</strong>
-                <span>{selectedFile ? "Selected snapshot vs parent" : "No file selected yet"}</span>
+                <span>{comparison ? "Snapshot A vs Snapshot B" : selectedFile ? "Selected snapshot vs parent" : "No file selected yet"}</span>
               </div>
               <div>
                 <strong>Snapshot</strong>
-                <span>{selected.short_hash} · {selected.message}</span>
+                <span>{comparison ? `${comparison.left_label} → ${comparison.right_label}` : `${selected.short_hash} · ${selected.message}`}</span>
               </div>
               <div>
                 <strong>File</strong>
-                <span>{selectedFile ? selectedFile.path : "Select a changed file to inspect its patch"}</span>
+                <span>{comparison ? `${comparison.changed_files.length} changed file(s) in comparison` : selectedFile ? selectedFile.path : "Select a changed file to inspect its patch"}</span>
               </div>
             </div>
           ) : null}
 
-          {selectedFile ? (
+          {comparison ? (
+            <div className="comparison-summary">
+              <div><strong>{comparison.changed_files.length}</strong><span>changed files</span></div>
+              <div><strong>+{comparison.insertions}</strong><span>insertions</span></div>
+              <div><strong>-{comparison.deletions}</strong><span>deletions</span></div>
+            </div>
+          ) : null}
+
+          {comparison ? (
+            <div className="diff-actions">
+              <div className="diff-action-row">
+                <button onClick={explainComparison} disabled={explainBusy || !comparison.diff.trim() || !llmModel}>
+                  {explainBusy ? `${llmModel} is thinking...` : `Ask ${llmModel} to explain A ↔ B`}
+                </button>
+              </div>
+            </div>
+          ) : selectedFile ? (
             <div className="diff-actions">
               <div className="diff-action-row">
                 <button onClick={explainSelectedDiff} disabled={explainBusy || !diff.trim() || !llmModel}>

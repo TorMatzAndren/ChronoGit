@@ -136,6 +136,29 @@ struct DiffResult {
     diff: String,
 }
 
+#[derive(Serialize)]
+struct CommitComparison {
+    left_commit: String,
+    right_commit: String,
+    left_label: String,
+    right_label: String,
+    changed_files: Vec<ChangedFile>,
+    insertions: i32,
+    deletions: i32,
+    diff: String,
+}
+
+#[derive(Serialize)]
+struct FileHistoryEntry {
+    hash: String,
+    short_hash: String,
+    author: String,
+    timestamp: String,
+    message: String,
+    status: String,
+    path: String,
+}
+
 
 #[tauri::command]
 fn open_external_url(url: String) -> Result<String, String> {
@@ -1000,6 +1023,52 @@ fn validate_relative_path(path: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_commitish(repo_path: &str, value: &str) -> Result<(), String> {
+    let trimmed = value.trim();
+
+    if trimmed.is_empty() {
+        return Err("Commit reference is empty.".into());
+    }
+
+    if trimmed.starts_with('-') {
+        return Err("Commit reference may not start with '-'.".into());
+    }
+
+    if trimmed.chars().any(|ch| ch.is_whitespace()) {
+        return Err("Commit reference may not contain whitespace.".into());
+    }
+
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(repo_path)
+        .args(["rev-parse", "--verify"])
+        .arg(format!("{}^{{commit}}", trimmed))
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if out.status.success() {
+        Ok(())
+    } else {
+        Err(format!("Invalid commit reference: {}", trimmed))
+    }
+}
+
+fn commit_label(repo_path: &str, commit: &str) -> Result<String, String> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(repo_path)
+        .args(["log", "-1", "--pretty=format:%h %s"])
+        .arg(commit)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if out.status.success() {
+        Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    } else {
+        Err(command_error("git log -1 --pretty=format", &out))
+    }
+}
+
 #[tauri::command]
 fn git_remove_untracked(repo_path: String, path: String) -> Result<String, String> {
     validate_relative_path(&path)?;
@@ -1264,6 +1333,9 @@ fn git_changed_files_from_commit(repo_path: String, commit_hash: String) -> Resu
 
 #[tauri::command]
 fn git_diff_file_from_commit(repo_path: String, commit_hash: String, path: String) -> Result<DiffResult, String> {
+    validate_relative_path(&path)?;
+    validate_commitish(&repo_path, &commit_hash)?;
+
     let range = format!("{}^!", commit_hash);
 
     let out = Command::new("git")
@@ -1285,6 +1357,163 @@ fn git_diff_file_from_commit(repo_path: String, commit_hash: String, path: Strin
         path,
         diff: String::from_utf8_lossy(&out.stdout).to_string(),
     })
+}
+
+#[tauri::command]
+fn git_compare_commits(repo_path: String, left_commit: String, right_commit: String) -> Result<CommitComparison, String> {
+    validate_commitish(&repo_path, &left_commit)?;
+    validate_commitish(&repo_path, &right_commit)?;
+
+    if left_commit == right_commit {
+        return Err("Comparison blocked: select two different snapshots.".into());
+    }
+
+    let name_out = Command::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .args(["diff", "--name-status", "--find-renames", "--find-copies"])
+        .arg(&left_commit)
+        .arg(&right_commit)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !name_out.status.success() {
+        return Err(command_error("git diff --name-status A B", &name_out));
+    }
+
+    let mut changed_files = Vec::new();
+
+    for line in String::from_utf8_lossy(&name_out.stdout).lines() {
+        let mut parts = line.split_whitespace();
+        let status = parts.next().unwrap_or("").to_string();
+        let path = parts.last().unwrap_or("").to_string();
+
+        if !path.is_empty() {
+            changed_files.push(ChangedFile { path, status });
+        }
+    }
+
+    let stat_out = Command::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .args(["diff", "--numstat"])
+        .arg(&left_commit)
+        .arg(&right_commit)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !stat_out.status.success() {
+        return Err(command_error("git diff --numstat A B", &stat_out));
+    }
+
+    let mut insertions: i32 = 0;
+    let mut deletions: i32 = 0;
+
+    for line in String::from_utf8_lossy(&stat_out.stdout).lines() {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+
+        if parts.len() < 2 {
+            continue;
+        }
+
+        if let Ok(value) = parts[0].parse::<i32>() {
+            insertions += value;
+        }
+
+        if let Ok(value) = parts[1].parse::<i32>() {
+            deletions += value;
+        }
+    }
+
+    let diff_out = Command::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .args(["diff", "--find-renames", "--find-copies"])
+        .arg(&left_commit)
+        .arg(&right_commit)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !diff_out.status.success() {
+        return Err(command_error("git diff A B", &diff_out));
+    }
+
+    Ok(CommitComparison {
+        left_label: commit_label(&repo_path, &left_commit)?,
+        right_label: commit_label(&repo_path, &right_commit)?,
+        left_commit,
+        right_commit,
+        changed_files,
+        insertions,
+        deletions,
+        diff: String::from_utf8_lossy(&diff_out.stdout).to_string(),
+    })
+}
+
+#[tauri::command]
+fn git_file_history(repo_path: String, path: String) -> Result<Vec<FileHistoryEntry>, String> {
+    validate_relative_path(&path)?;
+
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .args([
+            "log",
+            "--follow",
+            "--name-status",
+            "--pretty=format:COMMIT%x1f%H%x1f%h%x1f%an%x1f%cI%x1f%s",
+            "--",
+        ])
+        .arg(&path)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !out.status.success() {
+        return Err(command_error("git log --follow --name-status", &out));
+    }
+
+    let mut entries = Vec::new();
+    let mut current: Option<(String, String, String, String, String)> = None;
+
+    for line in String::from_utf8_lossy(&out.stdout).lines() {
+        if let Some(rest) = line.strip_prefix("COMMIT\x1f") {
+            let parts: Vec<&str> = rest.split('\x1f').collect();
+            if parts.len() == 5 {
+                current = Some((
+                    parts[0].to_string(),
+                    parts[1].to_string(),
+                    parts[2].to_string(),
+                    parts[3].to_string(),
+                    parts[4].to_string(),
+                ));
+            }
+            continue;
+        }
+
+        if line.trim().is_empty() {
+            continue;
+        }
+
+        if let Some((hash, short_hash, author, timestamp, message)) = current.clone() {
+            let mut parts = line.split_whitespace();
+            let status = parts.next().unwrap_or("").to_string();
+            let changed_path = parts.last().unwrap_or("").to_string();
+
+            if !status.is_empty() && !changed_path.is_empty() {
+                entries.push(FileHistoryEntry {
+                    hash,
+                    short_hash,
+                    author,
+                    timestamp,
+                    message,
+                    status,
+                    path: changed_path,
+                });
+            }
+        }
+    }
+
+    Ok(entries)
 }
 
 #[derive(Serialize)]
@@ -1948,6 +2177,9 @@ fn git_rebase_abort(repo_path: String) -> Result<String, String> {
 
 #[tauri::command]
 fn git_restore_file_from_commit(repo_path: String, commit_hash: String, path: String) -> Result<String, String> {
+    validate_relative_path(&path)?;
+    validate_commitish(&repo_path, &commit_hash)?;
+
     let out = Command::new("git")
         .arg("-C")
         .arg(&repo_path)
@@ -1989,6 +2221,8 @@ pub fn run() {
             git_history,
             git_changed_files_from_commit,
             git_diff_file_from_commit,
+            git_compare_commits,
+            git_file_history,
             explain_diff_with_ollama,
             explain_context_with_ollama,
             list_local_llm_models,
