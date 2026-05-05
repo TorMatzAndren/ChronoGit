@@ -33,6 +33,45 @@ struct GitRemoteStatus {
     is_clean: bool,
 }
 
+#[derive(Serialize)]
+struct RemotePullResult {
+    ok: bool,
+    message: String,
+    stdout: String,
+    stderr: String,
+}
+
+#[derive(Serialize)]
+struct MergeSafetyPrediction {
+    classification: String,
+    risk_level: String,
+    summary: String,
+    local_touched_files: usize,
+    remote_touched_files: usize,
+    local_files: Vec<String>,
+    remote_files: Vec<String>,
+    shared_files: Vec<String>,
+    working_changes: usize,
+    warning: String,
+}
+
+#[derive(Serialize)]
+struct RemoteOperationPreview {
+    operation: String,
+    repo_path: String,
+    branch: String,
+    upstream: Option<String>,
+    remote: Option<String>,
+    ahead: u32,
+    behind: u32,
+    commit_count: usize,
+    commits: Vec<String>,
+    changed_files: Vec<ChangedFile>,
+    consequence: String,
+    warning: String,
+    merge_safety: MergeSafetyPrediction,
+}
+
 
 #[derive(Serialize)]
 struct RepoInfo {
@@ -413,6 +452,324 @@ fn git_remote_status(repo_path: String) -> Result<GitRemoteStatus, String> {
         is_clean,
     })
 }
+
+
+fn current_branch(repo_path: &str) -> Result<String, String> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(repo_path)
+        .args(["branch", "--show-current"])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !out.status.success() {
+        return Err(command_error("git branch --show-current", &out));
+    }
+
+    let branch = String::from_utf8_lossy(&out.stdout).trim().to_string();
+
+    if branch.is_empty() {
+        Err("Current repository is in detached HEAD state. Remote preview requires a branch.".into())
+    } else {
+        Ok(branch)
+    }
+}
+
+fn current_upstream(repo_path: &str) -> Result<String, String> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(repo_path)
+        .args(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !out.status.success() {
+        return Err("No upstream tracking branch is configured for this branch.".into());
+    }
+
+    let upstream = String::from_utf8_lossy(&out.stdout).trim().to_string();
+
+    if upstream.is_empty() {
+        Err("No upstream tracking branch is configured for this branch.".into())
+    } else {
+        Ok(upstream)
+    }
+}
+
+fn remote_name_from_upstream(upstream: &str) -> Option<String> {
+    upstream.split('/').next().map(|value| value.to_string())
+}
+
+fn ahead_behind_against_upstream(repo_path: &str) -> Result<(u32, u32), String> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(repo_path)
+        .args(["rev-list", "--left-right", "--count", "@{u}...HEAD"])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !out.status.success() {
+        return Err(command_error("git rev-list --left-right --count @{u}...HEAD", &out));
+    }
+
+    let text = String::from_utf8_lossy(&out.stdout);
+    let parts: Vec<&str> = text.split_whitespace().collect();
+
+    if parts.len() < 2 {
+        return Err(format!("Could not parse ahead/behind counts: {}", text.trim()));
+    }
+
+    let behind = parts[0].parse::<u32>().unwrap_or(0);
+    let ahead = parts[1].parse::<u32>().unwrap_or(0);
+
+    Ok((ahead, behind))
+}
+
+fn preview_commits(repo_path: &str, range: &str) -> Result<Vec<String>, String> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(repo_path)
+        .args(["log", "--oneline", "--decorate=no"])
+        .arg(range)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !out.status.success() {
+        return Err(command_error("git log preview range", &out));
+    }
+
+    Ok(String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(|line| line.to_string())
+        .filter(|line| !line.trim().is_empty())
+        .collect())
+}
+
+
+fn preview_commit_hashes(repo_path: &str, range: &str) -> Result<Vec<String>, String> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(repo_path)
+        .args(["log", "--format=%H"])
+        .arg(range)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !out.status.success() {
+        return Err(command_error("git log --format=%H preview range", &out));
+    }
+
+    Ok(String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(|line| line.trim().to_string())
+        .filter(|line| !line.is_empty())
+        .collect())
+}
+
+fn preview_changed_files_from_commits(repo_path: &str, range: &str) -> Result<Vec<ChangedFile>, String> {
+    let commits = preview_commit_hashes(repo_path, range)?;
+    let mut seen = std::collections::BTreeSet::<(String, String)>::new();
+
+    for commit in commits {
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(repo_path)
+            .args(["diff-tree", "--root", "--no-commit-id", "--name-status", "-r", "--find-renames", "--find-copies"])
+            .arg(&commit)
+            .output()
+            .map_err(|e| e.to_string())?;
+
+        if !out.status.success() {
+            return Err(command_error("git diff-tree directional preview", &out));
+        }
+
+        for line in String::from_utf8_lossy(&out.stdout).lines() {
+            let mut parts = line.split_whitespace();
+            let status = parts.next().unwrap_or("").to_string();
+            let path = parts.last().unwrap_or("").to_string();
+
+            if !path.is_empty() {
+                seen.insert((path, status));
+            }
+        }
+    }
+
+    Ok(seen.into_iter().map(|(path, status)| ChangedFile { path, status }).collect())
+}
+
+fn count_working_changes(repo_path: &str) -> Result<usize, String> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(repo_path)
+        .args(["status", "--porcelain=v1"])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !out.status.success() {
+        return Err(command_error("git status --porcelain=v1", &out));
+    }
+
+    Ok(String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .count())
+}
+
+fn build_merge_safety_prediction(repo_path: &str) -> Result<MergeSafetyPrediction, String> {
+    let local_files = preview_changed_files_from_commits(repo_path, "@{u}..HEAD")?;
+    let remote_files = preview_changed_files_from_commits(repo_path, "HEAD..@{u}")?;
+    let working_changes = count_working_changes(repo_path)?;
+
+    let local_paths: std::collections::BTreeSet<String> =
+        local_files.iter().map(|file| file.path.clone()).collect();
+
+    let remote_paths: std::collections::BTreeSet<String> =
+        remote_files.iter().map(|file| file.path.clone()).collect();
+
+    let shared_files: Vec<String> = local_paths.intersection(&remote_paths).cloned().collect();
+
+    let classification = if !shared_files.is_empty() {
+        "NEEDS REVIEW".to_string()
+    } else if local_paths.is_empty() || remote_paths.is_empty() {
+        "ONE-WAY".to_string()
+    } else {
+        "LIKELY CLEAN".to_string()
+    };
+
+    let risk_level = if !shared_files.is_empty() && working_changes > 0 {
+        "HIGH".to_string()
+    } else if !shared_files.is_empty() || working_changes > 0 {
+        "MEDIUM".to_string()
+    } else {
+        "LOW".to_string()
+    };
+
+    let summary = if !shared_files.is_empty() {
+        "Local-only and remote-only commits touch at least one same path. A merge conflict is possible and must be reviewed before real download/merge.".to_string()
+    } else if local_paths.is_empty() && remote_paths.is_empty() {
+        "No local-only or remote-only file changes are visible in this preview.".to_string()
+    } else if local_paths.is_empty() {
+        "Only the remote side has unique file changes. Download may be straightforward, but ChronoGit has not executed a merge.".to_string()
+    } else if remote_paths.is_empty() {
+        "Only the local side has unique file changes. Upload should not change working files, but it will publish local snapshots.".to_string()
+    } else {
+        "Local-only and remote-only commits touch different paths. A clean merge is likely, but not guaranteed until Git actually merges.".to_string()
+    };
+
+    let warning = if working_changes > 0 {
+        "Working folder has uncommitted changes. Remote actions are harder to reason about until the working folder is clean.".to_string()
+    } else if !shared_files.is_empty() {
+        "Same-path changes detected across local and remote histories. Review before any real pull/merge.".to_string()
+    } else {
+        "Prediction only. Git remains the authority; no merge has been executed.".to_string()
+    };
+
+    Ok(MergeSafetyPrediction {
+        classification,
+        risk_level,
+        summary,
+        local_touched_files: local_paths.len(),
+        remote_touched_files: remote_paths.len(),
+        local_files: local_paths.into_iter().collect(),
+        remote_files: remote_paths.into_iter().collect(),
+        shared_files,
+        working_changes,
+        warning,
+    })
+}
+
+
+#[tauri::command]
+fn git_fetch_remote(repo_path: String) -> Result<String, String> {
+    let upstream = current_upstream(&repo_path)?;
+    let remote = remote_name_from_upstream(&upstream)
+        .ok_or_else(|| format!("Could not determine remote name from upstream: {}", upstream))?;
+
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .args(["fetch", "--prune", &remote])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if out.status.success() {
+        Ok(format!(
+            "Fetched remote knowledge from {}. Working files were not changed.",
+            remote
+        ))
+    } else {
+        Err(command_error("git fetch --prune <remote>", &out))
+    }
+}
+
+#[tauri::command]
+fn git_push_preview(repo_path: String) -> Result<RemoteOperationPreview, String> {
+    let branch = current_branch(&repo_path)?;
+    let upstream = current_upstream(&repo_path)?;
+    let remote = remote_name_from_upstream(&upstream);
+    let (ahead, behind) = ahead_behind_against_upstream(&repo_path)?;
+
+    let commits = preview_commits(&repo_path, "@{u}..HEAD")?;
+    let changed_files = preview_changed_files_from_commits(&repo_path, "@{u}..HEAD")?;
+    let merge_safety = build_merge_safety_prediction(&repo_path)?;
+
+    Ok(RemoteOperationPreview {
+        operation: "upload_snapshots_preview".to_string(),
+        repo_path,
+        branch,
+        upstream: Some(upstream),
+        remote,
+        ahead,
+        behind,
+        commit_count: commits.len(),
+        commits,
+        changed_files,
+        consequence: "Preview only. No snapshots were uploaded. Working files were not changed.".to_string(),
+        warning: if ahead == 0 {
+            "Nothing local is ahead of the upstream branch.".to_string()
+        } else if behind > 0 {
+            "Branch is diverged. Upload preview shows only local-only commits; it does not include remote-only work.".to_string()
+        } else {
+            "Uploading would make these local snapshots visible on the configured remote.".to_string()
+        },
+        merge_safety,
+    })
+}
+
+#[tauri::command]
+fn git_pull_preview(repo_path: String) -> Result<RemoteOperationPreview, String> {
+    let branch = current_branch(&repo_path)?;
+    let upstream = current_upstream(&repo_path)?;
+    let remote = remote_name_from_upstream(&upstream);
+    let (ahead, behind) = ahead_behind_against_upstream(&repo_path)?;
+
+    let commits = preview_commits(&repo_path, "HEAD..@{u}")?;
+    let changed_files = preview_changed_files_from_commits(&repo_path, "HEAD..@{u}")?;
+    let merge_safety = build_merge_safety_prediction(&repo_path)?;
+
+    Ok(RemoteOperationPreview {
+        operation: "download_updates_preview".to_string(),
+        repo_path,
+        branch,
+        upstream: Some(upstream),
+        remote,
+        ahead,
+        behind,
+        commit_count: commits.len(),
+        commits,
+        changed_files,
+        consequence: "Preview only. No remote snapshots were downloaded into the working branch. Working files were not changed.".to_string(),
+        warning: if behind == 0 {
+            "Nothing remote is ahead of this local branch.".to_string()
+        } else if ahead > 0 {
+            "Branch is diverged. Download preview shows only remote-only commits; local-only work remains separate.".to_string()
+        } else {
+            "Downloading updates may modify files and may create conflicts when implemented as a real action.".to_string()
+        },
+        merge_safety,
+    })
+}
+
 
 #[tauri::command]
 fn git_status(repo_path: String) -> Result<GitStatusResponse, String> {
@@ -1332,6 +1689,68 @@ DIFF:\n{}",
     })
 }
 
+
+#[tauri::command]
+fn git_pull_rebase_execute(repo_path: String, override_token: String) -> Result<RemotePullResult, String> {
+    let _upstream = current_upstream(&repo_path)?;
+    let (ahead, behind) = ahead_behind_against_upstream(&repo_path)?;
+    let merge_safety = build_merge_safety_prediction(&repo_path)?;
+
+    if behind == 0 {
+        return Err("Download blocked: remote is not ahead of this branch.".into());
+    }
+
+    if ahead > 0 && merge_safety.risk_level == "HIGH" && override_token.trim() != "override" {
+        return Err("Download blocked: HIGH risk requires typing override.".into());
+    }
+
+    if merge_safety.risk_level == "MEDIUM" && override_token.trim() != "confirm" {
+        return Err("Download blocked: MEDIUM risk requires explicit confirmation.".into());
+    }
+
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .args(["pull", "--rebase", "--autostash"])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+
+    if out.status.success() {
+        Ok(RemotePullResult {
+            ok: true,
+            message: "Downloaded remote updates with git pull --rebase --autostash. Refresh state and inspect history.".to_string(),
+            stdout,
+            stderr,
+        })
+    } else {
+        Err(format!(
+            "Download failed during git pull --rebase --autostash.\n\nstdout:\n{}\n\nstderr:\n{}\n\nIf Git started a rebase, use Abort rebase before trying another strategy.",
+            stdout,
+            stderr
+        ))
+    }
+}
+
+#[tauri::command]
+fn git_rebase_abort(repo_path: String) -> Result<String, String> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .args(["rebase", "--abort"])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if out.status.success() {
+        Ok("Git rebase abort completed. Refresh ChronoGit state before taking another remote action.".to_string())
+    } else {
+        Err(command_error("git rebase --abort", &out))
+    }
+}
+
+
 #[tauri::command]
 fn git_restore_file_from_commit(repo_path: String, commit_hash: String, path: String) -> Result<String, String> {
     let out = Command::new("git")
@@ -1356,6 +1775,11 @@ pub fn run() {
             detect_git,
             discover_git_repos,
             git_remote_status,
+            git_fetch_remote,
+            git_push_preview,
+            git_pull_preview,
+            git_pull_rebase_execute,
+            git_rebase_abort,
             git_status,
             git_commit_preflight,
             git_stage,

@@ -68,6 +68,42 @@ type DiffResult = {
   diff: string;
 };
 
+type RemotePullResult = {
+  ok: boolean;
+  message: string;
+  stdout: string;
+  stderr: string;
+};
+
+type MergeSafetyPrediction = {
+  classification: string;
+  risk_level: string;
+  summary: string;
+  local_touched_files: number;
+  remote_touched_files: number;
+  local_files: string[];
+  remote_files: string[];
+  shared_files: string[];
+  working_changes: number;
+  warning: string;
+};
+
+type RemoteOperationPreview = {
+  operation: string;
+  repo_path: string;
+  branch: string;
+  upstream: string | null;
+  remote: string | null;
+  ahead: number;
+  behind: number;
+  commit_count: number;
+  commits: string[];
+  changed_files: ChangedFile[];
+  consequence: string;
+  warning: string;
+  merge_safety: MergeSafetyPrediction;
+};
+
 type ExplainDiffResult = {
   model: string;
   explanation: string;
@@ -135,6 +171,113 @@ function snapshotRemoteSentence(remote: GitRemoteStatus | null) {
 
   return "Remote context: local and remote are currently in sync. This new snapshot still remains local until pushed.";
 }
+
+
+function beginnerHelpTitle(title: string, body: string) {
+  return `${title}\n\n${body}`;
+}
+
+function maybeBeginnerTitle(enabled: boolean, title: string, body: string) {
+  return enabled ? beginnerHelpTitle(title, body) : undefined;
+}
+
+function mergeClassificationCondition(preview: RemoteOperationPreview) {
+  if (preview.merge_safety.working_changes > 0) return "Working tree not clean";
+  return "No extra condition flags.";
+}
+
+function guardedRemoteToken(preview: RemoteOperationPreview) {
+  if (preview.merge_safety.risk_level === "HIGH") return "override";
+  return "confirm";
+}
+
+function remoteSafetyGateTitle(preview: RemoteOperationPreview) {
+  if (preview.operation === "download_updates_preview") {
+    if (preview.merge_safety.risk_level === "HIGH") return "Download blocked by default";
+    if (preview.merge_safety.risk_level === "MEDIUM") return "Download needs review first";
+    return "Download appears low-risk";
+  }
+
+  if (preview.operation === "upload_snapshots_preview") {
+    if (preview.behind > 0) return "Upload does not resolve divergence";
+    return "Upload appears straightforward";
+  }
+
+  return "Remote action needs review";
+}
+
+function remoteSafetyGateText(preview: RemoteOperationPreview) {
+  if (preview.operation === "download_updates_preview") {
+    if (preview.merge_safety.risk_level === "HIGH") return "Do not perform a real download/merge yet unless this is intentional. Same-path overlap and dirty working state can cause conflict.";
+    if (preview.merge_safety.risk_level === "MEDIUM") return "Review before real download. Clean or snapshot working changes first if possible.";
+    return "No same-path overlap or dirty working state was detected. Git remains authoritative.";
+  }
+
+  if (preview.operation === "upload_snapshots_preview") {
+    if (preview.behind > 0) return "You can upload local snapshots, but the branch will still be diverged because remote-only snapshots also exist.";
+    return "Upload would publish local snapshots to the configured remote. Working files are not changed by upload.";
+  }
+
+  return "Preview only.";
+}
+
+function remoteRecommendedAction(preview: RemoteOperationPreview) {
+  if (preview.operation === "download_updates_preview") {
+    if (preview.merge_safety.risk_level === "HIGH") return "Recommended: stop, clean/snapshot working changes, inspect overlap, then intentionally override only if you mean it.";
+    if (preview.merge_safety.risk_level === "MEDIUM") return "Recommended: clean or snapshot local working changes before download/merge.";
+    return "Recommended: safe to consider real download when ready.";
+  }
+
+  if (preview.operation === "upload_snapshots_preview") {
+    if (preview.behind > 0) return "Recommended: understand remote-only work before treating upload as synchronization.";
+    return "Recommended: safe to consider real upload if these snapshots should be shared.";
+  }
+
+  return "Recommended: review Git truth before acting.";
+}
+
+function guardedRemoteActionTitle(preview: RemoteOperationPreview) {
+  const action = preview.operation === "download_updates_preview" ? "Download updates" : "Upload snapshots";
+  if (preview.merge_safety.risk_level === "HIGH") return `${action}: high-risk override required`;
+  if (preview.merge_safety.risk_level === "MEDIUM") return `${action}: confirmation required`;
+  return `${action}: low-risk confirmation`;
+}
+
+function guardedRemoteActionBody(preview: RemoteOperationPreview) {
+  const action = preview.operation === "download_updates_preview" ? "download/merge remote updates" : "upload local snapshots";
+
+  return [
+    `Requested action: ${action}`,
+    ``,
+    `Risk: ${preview.merge_safety.risk_level}`,
+    `Classification: ${preview.merge_safety.classification}`,
+    `Condition: ${mergeClassificationCondition(preview)}`,
+    `Ahead / behind: +${preview.ahead} / -${preview.behind}`,
+    ``,
+    `Safety summary:`,
+    preview.merge_safety.summary,
+    ``,
+    `Warning:`,
+    preview.merge_safety.warning,
+    ``,
+    preview.operation === "download_updates_preview"
+      ? `Important: confirming this will run git pull --rebase --autostash. If Git reports a conflict, use Abort rebase before trying another strategy.`
+      : `Important: real upload is not implemented in this panel yet. Confirming upload intention records the safety decision only.`,
+  ].join("\n");
+}
+
+function guardedRemoteActionLabel(preview: RemoteOperationPreview) {
+  if (preview.merge_safety.risk_level === "HIGH") return "I understand: override high-risk gate";
+  if (preview.merge_safety.risk_level === "MEDIUM") return "Confirm medium-risk intention";
+  return "Confirm low-risk intention";
+}
+
+function guardedRemoteActionPolicy(preview: RemoteOperationPreview) {
+  if (preview.merge_safety.risk_level === "HIGH") return "Blocked by default. Intentional override requires typing override.";
+  if (preview.merge_safety.risk_level === "MEDIUM") return "Proceed with caution: explicit confirmation required.";
+  return "Low-risk. Confirmation is still shown because remote actions affect shared history or local files.";
+}
+
 
 function remoteStateLabel(remote: GitRemoteStatus | null) {
   if (!remote || !remote.has_remote) return "LOCAL ONLY";
@@ -317,6 +460,8 @@ type ConfirmAction = {
   confirmLabel: string;
   danger: boolean;
   action: () => Promise<void>;
+  requiredText?: string;
+  requiredTextLabel?: string;
 };
 
 function Timeline({
@@ -592,7 +737,10 @@ export default function App() {
   const [uiExplainOpen, setUiExplainOpen] = useState(false);
   const [uiExplainBusy, setUiExplainBusy] = useState(false);
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
+  const [confirmText, setConfirmText] = useState("");
   const [lastAction, setLastAction] = useState("No file-changing action performed in this session.");
+  const [remotePreview, setRemotePreview] = useState<RemoteOperationPreview | null>(null);
+  const [remoteBusy, setRemoteBusy] = useState("");
 
   async function refresh(path = repoPath) {
     const [statusResult, remoteResult] = await Promise.all([
@@ -726,6 +874,76 @@ export default function App() {
       setHistoryRefreshTick((value) => value + 1);
     } catch (err) {
       setMessage(`SNAPSHOT FAILED: ${err}`);
+    }
+  }
+
+
+  async function fetchRemoteKnowledge() {
+    try {
+      setRemoteBusy("fetch");
+      setMessage("");
+      const result = await invoke<string>("git_fetch_remote", { repoPath });
+      setMessage(result);
+      setLastAction(`${result} This updated remote-tracking knowledge only; it did not change working files.`);
+      await refresh();
+    } catch (err) {
+      setMessage(`Fetch remote knowledge failed: ${err}`);
+    } finally {
+      setRemoteBusy("");
+    }
+  }
+
+  async function loadRemotePreview(kind: "push" | "pull") {
+    try {
+      setRemoteBusy(kind);
+      setMessage("");
+      const command = kind === "push" ? "git_push_preview" : "git_pull_preview";
+      const result = await invoke<RemoteOperationPreview>(command, { repoPath });
+      setRemotePreview(result);
+    } catch (err) {
+      setRemotePreview(null);
+      setMessage(`${kind === "push" ? "Upload" : "Download"} preview failed: ${err}`);
+    } finally {
+      setRemoteBusy("");
+    }
+  }
+
+
+  async function executePullRebase(preview: RemoteOperationPreview) {
+    try {
+      setRemoteBusy("pull_execute");
+      setMessage("Running git pull --rebase --autostash...");
+      const result = await invoke<RemotePullResult>("git_pull_rebase_execute", {
+        repoPath,
+        overrideToken: guardedRemoteToken(preview),
+      });
+
+      setRemotePreview(null);
+      setMessage(`${result.message}${result.stdout ? ` stdout: ${result.stdout}` : ""}${result.stderr ? ` stderr: ${result.stderr}` : ""}`);
+      setLastAction(`${result.message} This may have changed local files/history; inspect Working, Prepared, and Time Machine before continuing.`);
+      await refresh();
+      setHistoryRefreshTick((value) => value + 1);
+    } catch (err) {
+      setMessage(`Download updates failed: ${err}`);
+      setLastAction("Download updates failed. If a rebase is in progress, use Abort rebase before trying another strategy.");
+    } finally {
+      setRemoteBusy("");
+    }
+  }
+
+  async function abortRebase() {
+    try {
+      setRemoteBusy("abort_rebase");
+      const result = await invoke<string>("git_rebase_abort", { repoPath });
+      setRemotePreview(null);
+      setMessage(result);
+      setLastAction(result);
+      await refresh();
+      setHistoryRefreshTick((value) => value + 1);
+    } catch (err) {
+      setMessage(`Abort rebase failed: ${err}`);
+    } finally {
+      setRemoteBusy("");
     }
   }
 
@@ -1174,6 +1392,171 @@ export default function App() {
 
       {message ? <div className="message">{message}</div> : null}
 
+
+      <section className="remote-actions-panel">
+        <div className="remote-actions-panel__header">
+          <div>
+            <h2>Remote synchronization preview</h2>
+            <p>Fetch updates remote knowledge. Upload/download previews do not push, pull, merge, or modify working files.</p>
+          </div>
+          <div className="remote-actions-panel__buttons">
+            <button title={beginnerTitle("Fetch remote knowledge\n\nUpdates Git's knowledge of the remote branch. Does not change working files, merge, pull, or push.")} disabled={remoteBusy !== ""} onClick={fetchRemoteKnowledge}>
+              {remoteBusy === "fetch" ? "Fetching..." : "Fetch remote knowledge"}
+            </button>
+            <button title={beginnerTitle("Upload snapshots preview\n\nShows local commits that would be shared. Preview only: does not push.")} disabled={remoteBusy !== ""} onClick={() => loadRemotePreview("push")}>
+              {remoteBusy === "push" ? "Checking..." : "Upload snapshots (preview)"}
+            </button>
+            <button title={beginnerTitle("Download updates preview\n\nShows remote commits that could be downloaded. Preview only: does not pull or merge.")} disabled={remoteBusy !== ""} onClick={() => loadRemotePreview("pull")}>
+              {remoteBusy === "pull" ? "Checking..." : "Download updates (preview)"}
+            </button>
+            <button title={beginnerTitle("Abort rebase\n\nUse only if Git started a rebase and the download/merge failed or conflicted.")} disabled={remoteBusy !== ""} className="danger-button" onClick={abortRebase}>
+              {remoteBusy === "abort_rebase" ? "Aborting..." : "Abort rebase"}
+            </button>
+          </div>
+        </div>
+
+        {beginnerMode ? (
+          <div className="remote-beginner-help">
+            <strong>Remote help:</strong> Fetch only updates knowledge. Upload shares local snapshots. Download brings remote snapshots into this branch. Rebase tries to replay your local snapshots after remote updates. Abort rebase is the emergency stop if Git reports a failed/conflicted rebase.
+          </div>
+        ) : null}
+
+        {remotePreview ? (
+          <div className="remote-preview-box">
+            <div className="remote-preview-box__truth">
+              <div><strong title={maybeBeginnerTitle(beginnerMode, "Operation", "This is the remote preview type. Upload preview means local snapshots that could be shared. Download preview means remote snapshots that could be brought into this branch.")}>Operation</strong><span>{remotePreview.operation}</span></div>
+              <div><strong title={maybeBeginnerTitle(beginnerMode, "Branch", "The local branch being compared against its configured upstream branch.")}>Branch</strong><span>{remotePreview.branch}</span></div>
+              <div><strong title={maybeBeginnerTitle(beginnerMode, "Upstream", "The remote-tracking branch Git uses as the comparison target for ahead/behind.")}>Upstream</strong><span>{remotePreview.upstream || "none"}</span></div>
+              <div><strong title={maybeBeginnerTitle(beginnerMode, "Ahead / Behind", "Ahead means local snapshots not on the remote. Behind means remote snapshots not in your local branch. If both are nonzero, the branch is diverged.")}>Ahead / Behind</strong><span>+{remotePreview.ahead} / -{remotePreview.behind}</span></div>
+            </div>
+
+            <div className="remote-preview-box__message">
+              <strong>Consequence</strong>
+              <span>{remotePreview.consequence}</span>
+            </div>
+
+            <div className="remote-preview-box__warning">
+              <strong title={maybeBeginnerTitle(beginnerMode, "Warning", "This explains the main risk or limitation of the selected remote direction.")}>Warning</strong>
+              <span>{remotePreview.warning}</span>
+            </div>
+
+            <div className="remote-merge-safety">
+              <div>
+                <strong title={maybeBeginnerTitle(beginnerMode, "Safe merge prediction", "ChronoGit compares local-only and remote-only touched paths before any real merge. This is a prediction only; Git remains the authority.")}>Safe merge prediction</strong>
+                <span>{remotePreview.merge_safety.classification}</span>
+              </div>
+              <p>{remotePreview.merge_safety.summary}</p>
+              <p>{remotePreview.merge_safety.warning}</p>
+
+              <div className="merge-condition-line">
+                <strong title={maybeBeginnerTitle(beginnerMode, "Condition", "Extra state that changes risk. For example, a dirty working tree means uncommitted local changes exist.")}>Condition</strong>
+                <span>{mergeClassificationCondition(remotePreview)}</span>
+              </div>
+
+              <div className="remote-merge-safety__facts">
+                <div
+                  className={`merge-risk merge-risk--${remotePreview.merge_safety.risk_level.toLowerCase()}`}
+                  title={maybeBeginnerTitle(beginnerMode, "Risk", "LOW means no overlap and clean working tree. MEDIUM means either overlap or dirty working tree. HIGH means overlap plus dirty working tree. Intentional override may be allowed, but never silently.")}
+                >
+                  RISK: {remotePreview.merge_safety.risk_level}
+                </div>
+                <code title={maybeBeginnerTitle(beginnerMode, "Local touched", "Number of unique paths touched by local-only commits.")}>local touched: {remotePreview.merge_safety.local_touched_files}</code>
+                <code title={maybeBeginnerTitle(beginnerMode, "Remote touched", "Number of unique paths touched by remote-only commits.")}>remote touched: {remotePreview.merge_safety.remote_touched_files}</code>
+                <code title={maybeBeginnerTitle(beginnerMode, "Working changes", "Current uncommitted changes in the working folder. These are not local snapshots yet and can make remote actions harder to reason about.")}>working changes: {remotePreview.merge_safety.working_changes}</code>
+              </div>
+
+              <div className="path-overlap-analysis">
+                <h3 title={maybeBeginnerTitle(beginnerMode, "Path overlap analysis", "Shows why ChronoGit thinks a merge is likely clean or risky. No overlap means local and remote commits touched different paths.")}>Path overlap analysis</h3>
+                <div className="path-overlap-analysis__grid">
+                  <div>
+                    <strong title={maybeBeginnerTitle(beginnerMode, "Local-only paths", "Files touched by commits that exist locally but not on the remote.")}>Local-only paths</strong>
+                    {remotePreview.merge_safety.local_files.length ? (
+                      remotePreview.merge_safety.local_files.map((file) => <code key={`local-${file}`}>{file}</code>)
+                    ) : (
+                      <span>No local-only paths.</span>
+                    )}
+                  </div>
+                  <div>
+                    <strong title={maybeBeginnerTitle(beginnerMode, "Remote-only paths", "Files touched by commits that exist on the remote but not in this local branch.")}>Remote-only paths</strong>
+                    {remotePreview.merge_safety.remote_files.length ? (
+                      remotePreview.merge_safety.remote_files.map((file) => <code key={`remote-${file}`}>{file}</code>)
+                    ) : (
+                      <span>No remote-only paths.</span>
+                    )}
+                  </div>
+                  <div>
+                    <strong title={maybeBeginnerTitle(beginnerMode, "Overlap", "Paths touched by both local-only and remote-only commits. Overlap increases merge conflict risk.")}>Overlap</strong>
+                    {remotePreview.merge_safety.shared_files.length ? (
+                      remotePreview.merge_safety.shared_files.map((file) => <code className="path-overlap-analysis__danger" key={`shared-${file}`}>{file}</code>)
+                    ) : (
+                      <span>No same-path overlap detected.</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className={`remote-safety-gate remote-safety-gate--${remotePreview.merge_safety.risk_level.toLowerCase()}`}>
+                <strong>{remoteSafetyGateTitle(remotePreview)}</strong>
+                <span>{remoteSafetyGateText(remotePreview)}</span>
+                <em>{remoteRecommendedAction(remotePreview)}</em>
+                <div className="remote-safety-gate__policy">{guardedRemoteActionPolicy(remotePreview)}</div>
+                <button
+                  className={remotePreview.merge_safety.risk_level === "HIGH" ? "danger-button" : ""}
+                  onClick={() => {
+                    const preview = remotePreview;
+                    setConfirmAction({
+                      title: guardedRemoteActionTitle(preview),
+                      body: guardedRemoteActionBody(preview),
+                      confirmLabel: guardedRemoteActionLabel(preview),
+                      danger: preview.merge_safety.risk_level === "HIGH",
+                      requiredText: preview.merge_safety.risk_level === "HIGH" ? "override" : undefined,
+                      requiredTextLabel: preview.merge_safety.risk_level === "HIGH" ? "Type override to intentionally continue despite HIGH risk." : undefined,
+                      action: async () => {
+                        if (preview.operation === "download_updates_preview") {
+                          await executePullRebase(preview);
+                        } else {
+                          setLastAction(`${guardedRemoteActionTitle(preview)} acknowledged. Real upload is not implemented in this build.`);
+                          setMessage(`${guardedRemoteActionTitle(preview)} acknowledged. ChronoGit did not push or modify files.`);
+                        }
+                      },
+                    });
+                    setConfirmText("");
+                  }}
+                >
+                  {remotePreview.merge_safety.risk_level === "HIGH"
+                    ? "Override high-risk gate"
+                    : remotePreview.merge_safety.risk_level === "MEDIUM"
+                      ? "Confirm intention"
+                      : "Confirm low-risk intention"}
+                </button>
+              </div>
+            </div>
+
+            <div className="remote-preview-columns">
+              <div>
+                <h3 title={maybeBeginnerTitle(beginnerMode, "Snapshots", "Commits in the selected direction only. Upload preview shows local-only snapshots. Download preview shows remote-only snapshots.")}>Snapshots ({remotePreview.commit_count})</h3>
+                {remotePreview.commits.length ? (
+                  remotePreview.commits.map((commit) => <code key={commit}>{commit}</code>)
+                ) : (
+                  <span className="remote-preview-empty">No snapshots in this direction.</span>
+                )}
+              </div>
+
+              <div>
+                <h3 title={maybeBeginnerTitle(beginnerMode, "Files that differ", "Files touched by snapshots in the selected direction only. This is not a full tree diff.")}>Files that differ ({remotePreview.changed_files.length})</h3>
+                {remotePreview.changed_files.length ? (
+                  remotePreview.changed_files.map((file) => (
+                    <code key={`${file.status}-${file.path}`}>{file.status} {file.path}</code>
+                  ))
+                ) : (
+                  <span className="remote-preview-empty">No file differences in this direction.</span>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : null}
+      </section>
+
       <section className="preflight-card">
         <div>
           <h2>Commit Preflight</h2>
@@ -1294,12 +1677,25 @@ export default function App() {
             <pre>{confirmAction.body}</pre>
 
             <div className="confirm-modal__actions">
-              <button onClick={() => setConfirmAction(null)}>Cancel</button>
+              <button onClick={() => { setConfirmAction(null); setConfirmText(""); }}>Cancel</button>
+              {confirmAction.requiredText ? (
+                <label className="confirm-required-text">
+                  <span>{confirmAction.requiredTextLabel || `Type ${confirmAction.requiredText} to continue.`}</span>
+                  <input
+                    value={confirmText}
+                    onChange={(event) => setConfirmText(event.target.value)}
+                    placeholder={confirmAction.requiredText}
+                  />
+                </label>
+              ) : null}
+
               <button
                 className={confirmAction.danger ? "danger-button" : "confirm"}
+                disabled={Boolean(confirmAction.requiredText && confirmText.trim() !== confirmAction.requiredText)}
                 onClick={async () => {
                   const actionToRun = confirmAction.action;
                   setConfirmAction(null);
+                  setConfirmText("");
                   await actionToRun();
                 }}
               >
