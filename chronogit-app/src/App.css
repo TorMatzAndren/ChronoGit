@@ -2833,3 +2833,41 @@ p {
   cursor: pointer;
   font-family: inherit;
 }
+
+/* Explicit diff scope clarity */
+.diff-scope-card {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr 1.6fr;
+  gap: 6px;
+  margin: 8px 0;
+  padding: 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(117, 183, 255, 0.16);
+  background: rgba(117, 183, 255, 0.055);
+}
+
+.diff-scope-card div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.diff-scope-card strong {
+  color: #75b7ff;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.diff-scope-card span {
+  color: #d7dde7;
+  font-size: 11px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 1000px) {
+  .diff-scope-card {
+    grid-template-columns: 1fr;
+  }
+}

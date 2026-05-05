@@ -705,6 +705,23 @@ function Timeline({
             {selectedFile ? `File diff: ${selectedFile.path}` : "No file selected"}
           </div>
 
+          {selected ? (
+            <div className="diff-scope-card">
+              <div>
+                <strong>Diff scope</strong>
+                <span>{selectedFile ? "Selected snapshot vs parent" : "No file selected yet"}</span>
+              </div>
+              <div>
+                <strong>Snapshot</strong>
+                <span>{selected.short_hash} · {selected.message}</span>
+              </div>
+              <div>
+                <strong>File</strong>
+                <span>{selectedFile ? selectedFile.path : "Select a changed file to inspect its patch"}</span>
+              </div>
+            </div>
+          ) : null}
+
           {selectedFile ? (
             <div className="diff-actions">
               <div className="diff-action-row">
@@ -820,15 +837,35 @@ export default function App() {
     const trimmed = messageText.trim();
     if (!trimmed) return;
 
-    setSystemLog((entries) => [
-      ...entries.slice(-119),
-      {
-        id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-        timestamp: new Date().toLocaleTimeString(),
-        level,
-        message: trimmed,
-      },
-    ]);
+    const lower = trimmed.toLowerCase();
+    const isRefreshStart = lower === "refreshing chronogit state...";
+    const isRefreshComplete = lower === "chronogit state and time machine refreshed.";
+
+    // Do not spam the durable system log with transient refresh-start messages.
+    if (isRefreshStart) return;
+
+    setSystemLog((entries) => {
+      const recent = entries.slice(-8);
+
+      // Collapse repeated refresh-complete messages and exact repeated messages.
+      if (isRefreshComplete && recent.some((entry) => entry.message === trimmed)) {
+        return entries;
+      }
+
+      if (entries.length && entries[entries.length - 1].message === trimmed) {
+        return entries;
+      }
+
+      return [
+        ...entries.slice(-119),
+        {
+          id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+          timestamp: new Date().toLocaleTimeString(),
+          level,
+          message: trimmed,
+        },
+      ];
+    });
   }
 
   function appendLlmEntry(entry: Omit<LlmLogEntry, "id" | "timestamp">) {
