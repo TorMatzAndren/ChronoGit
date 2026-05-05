@@ -2067,6 +2067,145 @@ DIFF:\n{}",
 
 
 #[tauri::command]
+fn explain_comparison_with_ollama(
+    model: String,
+    left_label: String,
+    right_label: String,
+    file_count: usize,
+    insertions: i32,
+    deletions: i32,
+    changed_files_text: String,
+    diff: String,
+) -> Result<ExplainDiffResult, String> {
+    let local_models = list_local_llm_models("ollama".to_string())?;
+    if !local_models.iter().any(|local_model| local_model.name == model) {
+        return Err(format!("Model blocked or unavailable locally: {}", model));
+    }
+
+    if diff.trim().is_empty() {
+        return Err("No comparison diff selected to explain.".into());
+    }
+
+    let (tdp_before_watts, tdp_default_watts) = query_gpu_power_limits()?;
+
+    let default_limit = tdp_default_watts
+        .split_whitespace()
+        .next()
+        .ok_or("Could not parse GPU default power limit.")?
+        .parse::<f32>()
+        .map_err(|e| format!("Could not parse GPU default power limit: {}", e))?;
+
+    let active_limit = (default_limit * 0.60).round() as u32;
+    let reset_limit = default_limit.round() as u32;
+
+    let tdp_set_warning = set_gpu_power_limit(active_limit).err();
+
+    let clipped_files: String = changed_files_text.chars().take(8000).collect();
+    let clipped_diff: String = diff.chars().take(26000).collect();
+
+    let prompt = format!(
+        "/no_think\n\
+You are ChronoGit, a local-only Git comparison assistant.\n\
+Return ONLY the final explanation. Do not include thinking, prelude, self-talk, or reasoning narration.\n\
+Explain this exact A ↔ B Git diff. Do not give a generic description of ChronoGit, React, Rust, Git, or UI architecture.\n\
+The user wants to understand what changed between these two selected snapshots.\n\n\
+Use this exact format:\n\
+Summary:\n\
+- ...\n\n\
+Structural changes:\n\
+- ...\n\n\
+Largest / most important file changes:\n\
+- ...\n\n\
+Risk notes:\n\
+- ...\n\n\
+Review first:\n\
+- ...\n\n\
+What NOT to infer:\n\
+- ...\n\n\
+Hard rules:\n\
+- Explain only what is visible in the supplied comparison stats, changed-file list, and diff.\n\
+- If a cause or intent is not visible, say: not visible in this diff.\n\
+- Do not summarize the application as a whole unless the diff directly changes that application behavior.\n\
+- Do not claim files changed unless they are in the changed-file list or diff.\n\
+- Prioritize the biggest code movements and user-visible behavior changes.\n\
+- Mention safety, mutation, Git state, LLM behavior, or UI consequence only when visible in changed lines.\n\
+- This is A ↔ B comparison, not necessarily one single commit.\n\
+- Git diff is authoritative. This explanation is advisory.\n\n\
+Comparison metadata:\n\
+A: {}\n\
+B: {}\n\
+Changed files: {}\n\
+Insertions: {}\n\
+Deletions: {}\n\n\
+Changed files:\n{}\n\n\
+DIFF:\n{}",
+        left_label,
+        right_label,
+        file_count,
+        insertions,
+        deletions,
+        clipped_files,
+        clipped_diff
+    );
+
+    let request = OllamaGenerateRequest {
+        model: model.clone(),
+        prompt,
+        stream: false,
+    };
+
+    let response = reqwest::blocking::Client::new()
+        .post("http://127.0.0.1:11434/api/generate")
+        .json(&request)
+        .send()
+        .map_err(|e| {
+            let _ = set_gpu_power_limit(reset_limit);
+            format!("Could not call local Ollama API: {}", e)
+        })?;
+
+    let tdp_reset_warning = set_gpu_power_limit(reset_limit).err();
+    let (tdp_reset_watts, _) = query_gpu_power_limits()
+        .unwrap_or_else(|_| ("unknown".to_string(), tdp_default_watts.clone()));
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().unwrap_or_else(|_| "Could not read Ollama error body.".to_string());
+        return Err(format!("Ollama API failed with {}: {}", status, body));
+    }
+
+    let parsed: OllamaGenerateResponse = response
+        .json()
+        .map_err(|e| format!("Could not parse Ollama API response: {}", e))?;
+
+    if let Some(error) = parsed.error {
+        return Err(error);
+    }
+
+    let mut cleaned = clean_ollama_text(parsed.response.as_deref().unwrap_or(""));
+
+    if cleaned.is_empty() {
+        cleaned = "Local LLM finished, but returned no readable comparison explanation.".to_string();
+    }
+
+    if let Some(warning) = tdp_set_warning {
+        cleaned = format!("[GPU TDP WARNING: could not set 60% power limit: {}]\n\n{}", warning, cleaned);
+    }
+
+    if let Some(warning) = tdp_reset_warning {
+        cleaned = format!("[GPU TDP WARNING: could not reset power limit: {}]\n\n{}", warning, cleaned);
+    }
+
+    Ok(ExplainDiffResult {
+        model,
+        explanation: cleaned,
+        tdp_before_watts,
+        tdp_active_watts: active_limit.to_string(),
+        tdp_reset_watts,
+    })
+}
+
+
+#[tauri::command]
 fn git_push_execute(repo_path: String, override_token: String) -> Result<RemotePushResult, String> {
     let _upstream = current_upstream(&repo_path)?;
     let (ahead, behind) = ahead_behind_against_upstream(&repo_path)?;
@@ -2225,6 +2364,7 @@ pub fn run() {
             git_file_history,
             explain_diff_with_ollama,
             explain_context_with_ollama,
+            explain_comparison_with_ollama,
             list_local_llm_models,
             git_restore_file_from_commit
         ])

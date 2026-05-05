@@ -620,22 +620,15 @@ function Timeline({
     try {
       setExplainBusy(true);
       setExplainStatus(`Local ${llmModel} is explaining A ↔ B comparison.`);
-      const result = await invoke<ExplainDiffResult>("explain_context_with_ollama", {
+      const result = await invoke<ExplainDiffResult>("explain_comparison_with_ollama", {
         model: llmModel,
-        kind: "comparison",
-        title: `Explain A ↔ B comparison: ${comparison.left_label} → ${comparison.right_label}`,
-        plainText: [
-          `Comparison: ${comparison.left_label} → ${comparison.right_label}`,
-          `Changed files: ${comparison.changed_files.length}`,
-          `Insertions: ${comparison.insertions}`,
-          `Deletions: ${comparison.deletions}`,
-          "",
-          "This is a direct comparison between two selected Git snapshots, not necessarily a single commit patch.",
-        ].join("\n"),
-        rawTruth: JSON.stringify({
-          comparison,
-          rule: "Git diff between selected commit A and selected commit B is authoritative. LLM explanation is advisory only.",
-        }, null, 2),
+        leftLabel: comparison.left_label,
+        rightLabel: comparison.right_label,
+        fileCount: comparison.changed_files.length,
+        insertions: comparison.insertions,
+        deletions: comparison.deletions,
+        changedFilesText: comparison.changed_files.map((file) => `${file.status} ${file.path}`).join("\n"),
+        diff: comparison.diff,
       });
 
       setExplainStatus(`Local ${result.model} finished. GPU TDP: ${result.tdp_before_watts}W → ${result.tdp_active_watts}W → ${result.tdp_reset_watts}W.`);
@@ -862,6 +855,15 @@ function Timeline({
               <div className="diff-action-row">
                 <button onClick={explainComparison} disabled={explainBusy || !comparison.diff.trim() || !llmModel}>
                   {explainBusy ? `${llmModel} is thinking...` : `Ask ${llmModel} to explain A ↔ B`}
+                </button>
+                <button
+                  disabled={!comparison.diff.trim()}
+                  onClick={async () => {
+                    await navigator.clipboard.writeText(comparison.diff);
+                    setExplainStatus("Complete A ↔ B diff copied to clipboard.");
+                  }}
+                >
+                  Copy complete diff
                 </button>
               </div>
             </div>
