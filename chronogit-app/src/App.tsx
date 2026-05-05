@@ -522,6 +522,7 @@ function Timeline({
   llmEngine,
   llmModel,
   appendLlmEntry,
+  beginnerMode,
 }: {
   repoPath: string;
   refreshTick: number;
@@ -529,6 +530,7 @@ function Timeline({
   llmEngine: string;
   llmModel: string;
   appendLlmEntry: (entry: Omit<LlmLogEntry, "id" | "timestamp">) => void;
+  beginnerMode: boolean;
 }) {
   const [history, setHistory] = useState<HistoryCommit[]>([]);
   const [selected, setSelected] = useState<HistoryCommit | null>(null);
@@ -543,6 +545,10 @@ function Timeline({
   const [explainOpen, setExplainOpen] = useState(false);
   const [explainBusy, setExplainBusy] = useState(false);
   const [error, setError] = useState("");
+
+  function focusTerm(beginnerText: string, advancedText: string) {
+    return beginnerMode ? beginnerText : advancedText;
+  }
 
   async function loadHistory() {
     try {
@@ -764,39 +770,72 @@ function Timeline({
 
       {error ? <div className="message">{error}</div> : null}
 
-      <div className={`focus-projection focus-projection--${focusProjection.kind}`}>
-        <strong>Focus</strong>
-        <span>
-          {focusProjection.kind === "comparison"
-            ? `Comparing ${focusProjection.comparison.left_label} → ${focusProjection.comparison.right_label}`
-            : focusProjection.kind === "file"
-              ? `Inspecting ${focusProjection.file.path} in ${focusProjection.commit.short_hash}`
-              : focusProjection.kind === "commit"
-                ? `Inspecting snapshot ${focusProjection.commit.short_hash} — ${focusProjection.commit.message}`
-                : "No focused inspection selected yet."}
-        </span>
-      </div>
+      <div className={`focus-surface focus-surface--${focusProjection.kind}`}>
+        <div className="focus-surface__main">
+          <div className="focus-surface__eyebrow">Focus Mode</div>
 
-      <div className="comparison-toolbar">
-        <div>
-          <strong>A ↔ B comparison</strong>
-          <span>
-            {compareBase
-              ? `A is ${compareBase.short_hash} — ${compareBase.message}`
-              : "Choose a snapshot as A, then compare another snapshot as B."}
-          </span>
+          <h3>
+            {focusProjection.kind === "comparison"
+              ? focusTerm("Snapshot comparison", "A ↔ B commit comparison")
+              : focusProjection.kind === "file"
+                ? focusTerm("File inspection", "File diff focus")
+                : focusProjection.kind === "commit"
+                  ? focusTerm("Snapshot inspection", "Commit focus")
+                  : "No focused inspection"}
+          </h3>
+
+          <p>
+            {focusProjection.kind === "comparison"
+              ? `Comparing ${focusProjection.comparison.left_label} → ${focusProjection.comparison.right_label}`
+              : focusProjection.kind === "file"
+                ? `Inspecting ${focusProjection.file.path} in ${focusProjection.commit.short_hash}`
+                : focusProjection.kind === "commit"
+                  ? `Inspecting ${focusProjection.commit.short_hash} — ${focusProjection.commit.message}`
+                  : "Select a snapshot, file, or comparison to project deeper Git truth here."}
+          </p>
         </div>
 
-        <div className="comparison-toolbar__actions">
+        <div className="focus-surface__facts">
+          {focusProjection.kind === "comparison" ? (
+            <>
+              <span><strong>{focusProjection.comparison.changed_files.length}</strong>{focusTerm("changed files", "files")}</span>
+              <span><strong>+{focusProjection.comparison.insertions}</strong>{focusTerm("added lines", "insertions")}</span>
+              <span><strong>-{focusProjection.comparison.deletions}</strong>{focusTerm("removed lines", "deletions")}</span>
+            </>
+          ) : focusProjection.kind === "file" ? (
+            <>
+              <span><strong>{focusProjection.file.status}</strong>{focusTerm("change type", "status")}</span>
+              <span><strong>{focusProjection.commit.short_hash}</strong>{focusTerm("snapshot", "commit")}</span>
+            </>
+          ) : focusProjection.kind === "commit" ? (
+            <>
+              <span><strong>{changedFiles.length}</strong>{focusTerm("changed files", "files")}</span>
+              <span><strong>{focusProjection.commit.short_hash}</strong>{focusTerm("snapshot", "commit")}</span>
+            </>
+          ) : (
+            <span><strong>—</strong>waiting for selection</span>
+          )}
+        </div>
+
+        <div className="focus-surface__actions">
           <button disabled={!selected} onClick={markCompareBase}>
-            Compare from here
+            {focusTerm("Use this as snapshot A", "Set A")}
           </button>
           <button disabled={!compareBase || !selected || compareBase.hash === selected?.hash} onClick={compareToSelected}>
-            Compare to selected
+            {focusTerm("Compare selected as snapshot B", "Compare A → B")}
           </button>
           <button disabled={!compareBase && !comparison} onClick={clearComparison}>
-            Clear comparison
+            {focusTerm("Clear comparison", "Clear A/B")}
           </button>
+        </div>
+
+        <div className="focus-surface__hint">
+          {compareBase
+            ? `A is ${compareBase.short_hash} — ${compareBase.message}`
+            : focusTerm(
+                "Beginner path: choose a snapshot as A, then choose another as B.",
+                "Advanced path: select A, select B, inspect git diff A B."
+              )}
         </div>
       </div>
 
@@ -981,6 +1020,8 @@ export default function App() {
       return [];
     }
   });
+  const llmDockRef = useRef<HTMLElement | null>(null);
+  const [llmDockPulse, setLlmDockPulse] = useState(false);
   const [lastAction, setLastAction] = useState("No file-changing action performed in this session.");
   const [remotePreview, setRemotePreview] = useState<RemoteOperationPreview | null>(null);
   const [armedRemoteUploadKey, setArmedRemoteUploadKey] = useState("");
@@ -1113,6 +1154,12 @@ export default function App() {
         content,
       },
     ]);
+
+    window.setTimeout(() => {
+      llmDockRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      setLlmDockPulse(true);
+      window.setTimeout(() => setLlmDockPulse(false), 1400);
+    }, 80);
   }
 
   function logLevelFromMessage(messageText: string): SystemLogEntry["level"] {
@@ -2054,6 +2101,7 @@ export default function App() {
         llmEngine={llmEngine}
         llmModel={llmModel}
         appendLlmEntry={appendLlmEntry}
+        beginnerMode={beginnerMode}
       />
 
 
@@ -2260,7 +2308,7 @@ export default function App() {
       </section>
 
 
-      <section className="chrono-log-dock">
+      <section ref={llmDockRef} className={`chrono-log-dock ${llmDockPulse ? "chrono-log-dock--pulse" : ""}`}>
         <div className="chrono-log-pane">
           <div className="chrono-log-pane__header chrono-log-pane__header--with-filters">
             <div>

@@ -3078,3 +3078,160 @@ p {
     align-items: stretch;
   }
 }
+
+
+/* ChronoGit Focus Surface: one contextual projection instead of more panels */
+.focus-surface {
+  display: grid;
+  grid-template-columns: minmax(260px, 1.4fr) minmax(220px, 0.9fr) auto;
+  grid-template-areas:
+    "main facts actions"
+    "hint hint hint";
+  gap: 8px;
+  align-items: stretch;
+  margin-bottom: 8px;
+  padding: 9px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(117, 183, 255, 0.18);
+  background:
+    radial-gradient(circle at top left, rgba(117, 183, 255, 0.07), transparent 20rem),
+    rgba(0, 0, 0, 0.24);
+}
+
+.focus-surface__main {
+  grid-area: main;
+  min-width: 0;
+}
+
+.focus-surface__eyebrow {
+  color: #75b7ff;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  margin-bottom: 3px;
+}
+
+.focus-surface h3 {
+  margin: 0 0 4px;
+  color: #ffffff;
+  font-size: 14px;
+}
+
+.focus-surface p {
+  margin: 0;
+  color: #c8d2e2;
+  font-size: 11px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.focus-surface__facts {
+  grid-area: facts;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.focus-surface__facts span {
+  display: grid;
+  gap: 2px;
+  padding: 7px 8px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  color: #8f9aae;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.focus-surface__facts strong {
+  color: #ffffff;
+  font-size: 17px;
+  line-height: 1;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.focus-surface__actions {
+  grid-area: actions;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-content: start;
+  gap: 6px;
+}
+
+.focus-surface__hint {
+  grid-area: hint;
+  padding-top: 7px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  color: #8f9aae;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.focus-surface--comparison {
+  border-color: rgba(100, 240, 200, 0.30);
+  background:
+    radial-gradient(circle at top left, rgba(100, 240, 200, 0.08), transparent 20rem),
+    rgba(0, 0, 0, 0.26);
+}
+
+.focus-surface--comparison .focus-surface__eyebrow {
+  color: #64f0c8;
+}
+
+.focus-surface--file {
+  border-color: rgba(255, 214, 128, 0.24);
+}
+
+.focus-surface--file .focus-surface__eyebrow {
+  color: #ffd680;
+}
+
+@media (max-width: 1100px) {
+  .focus-surface {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "main"
+      "facts"
+      "actions"
+      "hint";
+  }
+
+  .focus-surface__actions {
+    justify-content: flex-start;
+  }
+
+  .focus-surface__facts {
+    grid-template-columns: 1fr;
+  }
+}
+
+
+/* LLM answer arrival focus */
+.chrono-log-dock--pulse .chrono-log-pane:last-child {
+  animation: llm-answer-focus-pulse 1.25s ease-out;
+}
+
+@keyframes llm-answer-focus-pulse {
+  0% {
+    transform: scale(1);
+    border-color: rgba(100, 240, 200, 0.18);
+    box-shadow: none;
+  }
+
+  20% {
+    transform: scale(1.012);
+    border-color: rgba(100, 240, 200, 0.58);
+    box-shadow: 0 0 28px rgba(100, 240, 200, 0.16);
+  }
+
+  100% {
+    transform: scale(1);
+    border-color: rgba(180, 230, 255, 0.12);
+    box-shadow: none;
+  }
+}
