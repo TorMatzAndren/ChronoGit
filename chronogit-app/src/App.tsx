@@ -1247,6 +1247,16 @@ export default function App() {
         setExpandedPath((value) =>
           value.startsWith(`${path}:`) ? "" : value
         );
+
+        setData((current) =>
+          current
+            ? {
+                ...current,
+                staged: current.staged.filter((file) => file.path !== path),
+                working: current.working.filter((file) => file.path !== path),
+              }
+            : current
+        );
       }
 
       setMessage(result);
