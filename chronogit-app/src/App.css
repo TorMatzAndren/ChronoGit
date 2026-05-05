@@ -2537,3 +2537,66 @@ p {
     justify-self: start;
   }
 }
+
+/* Git interrupted-operation banner */
+.operation-state-banner {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: flex-start;
+  margin-bottom: 8px;
+  padding: 9px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 214, 128, 0.28);
+  background: rgba(255, 214, 128, 0.075);
+}
+
+.operation-state-banner strong {
+  display: block;
+  color: #ffd680;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 4px;
+}
+
+.operation-state-banner span {
+  display: block;
+  color: #d7dde7;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.operation-state-banner__files {
+  flex: 1 1 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.operation-state-banner__files code {
+  display: inline-block;
+  padding: 3px 6px;
+  border-radius: 7px;
+  background: rgba(255, 93, 93, 0.12);
+  color: #ffb3b3;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 10px;
+}
+
+.operation-state-banner--conflicts,
+.operation-state-banner--rebase-in-progress {
+  border-color: rgba(255, 93, 93, 0.42);
+  background: rgba(255, 93, 93, 0.09);
+}
+
+.operation-state-banner--conflicts strong,
+.operation-state-banner--rebase-in-progress strong {
+  color: #ff8f8f;
+}
+
+@media (max-width: 900px) {
+  .operation-state-banner {
+    flex-direction: column;
+  }
+}

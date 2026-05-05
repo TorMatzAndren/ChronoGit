@@ -37,6 +37,15 @@ type GitRemoteStatus = {
   is_clean: boolean;
 };
 
+type GitOperationState = {
+  rebase_in_progress: boolean;
+  merge_in_progress: boolean;
+  cherry_pick_in_progress: boolean;
+  revert_in_progress: boolean;
+  conflicted_files: string[];
+  warning: string;
+};
+
 type CommitResult = {
   ok: boolean;
   message: string;
@@ -751,6 +760,7 @@ export default function App() {
   const [repoPath, setRepoPath] = useState(() => localStorage.getItem("chronogit_repo_path") || "/home/dretski/projects/ChronoGit");
   const [repos, setRepos] = useState<RepoInfo[]>([]);
   const [remoteStatus, setRemoteStatus] = useState<GitRemoteStatus | null>(null);
+  const [operationState, setOperationState] = useState<GitOperationState | null>(null);
   const [beginnerMode, setBeginnerMode] = useState(() => localStorage.getItem("chronogit_beginner_mode") !== "off");
   const [llmEngine, setLlmEngine] = useState(() => localStorage.getItem("chronogit_llm_engine") || "ollama");
   const [llmModel, setLlmModel] = useState(() => localStorage.getItem("chronogit_llm_model") || "qwen3:8b");
@@ -809,13 +819,15 @@ export default function App() {
   }
 
   async function refresh(path = repoPath) {
-    const [statusResult, remoteResult] = await Promise.all([
+    const [statusResult, remoteResult, operationResult] = await Promise.all([
       invoke<GitStatusResponse>("git_status", { repoPath: path }),
       invoke<GitRemoteStatus>("git_remote_status", { repoPath: path }),
+      invoke<GitOperationState>("git_operation_state", { repoPath: path }),
     ]);
 
     setData(statusResult);
     setRemoteStatus(remoteResult);
+    setOperationState(operationResult);
     setLastRefresh(new Date().toLocaleTimeString());
   }
 
@@ -1081,6 +1093,32 @@ export default function App() {
     } finally {
       setUiExplainBusy(false);
     }
+  }
+
+
+  function operationStateLabel(state: GitOperationState | null) {
+    if (!state) return "UNKNOWN";
+    if (state.conflicted_files.length > 0) return "CONFLICTS";
+    if (state.rebase_in_progress) return "REBASE IN PROGRESS";
+    if (state.merge_in_progress) return "MERGE IN PROGRESS";
+    if (state.cherry_pick_in_progress) return "CHERRY-PICK IN PROGRESS";
+    if (state.revert_in_progress) return "REVERT IN PROGRESS";
+    return "CLEAR";
+  }
+
+  function operationStateClass(state: GitOperationState | null) {
+    return operationStateLabel(state).toLowerCase().replace(/ /g, "-");
+  }
+
+  function hasInterruptedOperation(state: GitOperationState | null) {
+    if (!state) return false;
+    return (
+      state.rebase_in_progress ||
+      state.merge_in_progress ||
+      state.cherry_pick_in_progress ||
+      state.revert_in_progress ||
+      state.conflicted_files.length > 0
+    );
   }
 
   function beginnerTitle(text: string) {
@@ -1426,6 +1464,30 @@ export default function App() {
           <span>Git is configured not to show these paths in normal status. They are hidden from normal ChronoGit change lists.</span>
         </div>
       </section>
+
+
+      {operationState && hasInterruptedOperation(operationState) ? (
+        <section className={`operation-state-banner operation-state-banner--${operationStateClass(operationState)}`}>
+          <div>
+            <strong>Git operation state: {operationStateLabel(operationState)}</strong>
+            <span>{operationState.warning}</span>
+          </div>
+
+          {operationState.conflicted_files.length ? (
+            <div className="operation-state-banner__files">
+              {operationState.conflicted_files.map((file) => (
+                <code key={file}>{file}</code>
+              ))}
+            </div>
+          ) : null}
+
+          {operationState.rebase_in_progress ? (
+            <button className="danger-button" disabled={remoteBusy !== ""} onClick={abortRebase}>
+              Abort rebase
+            </button>
+          ) : null}
+        </section>
+      ) : null}
 
       <section className="flow-strip">
         <div className="flow-step">

@@ -34,6 +34,16 @@ struct GitRemoteStatus {
 }
 
 #[derive(Serialize)]
+struct GitOperationState {
+    rebase_in_progress: bool,
+    merge_in_progress: bool,
+    cherry_pick_in_progress: bool,
+    revert_in_progress: bool,
+    conflicted_files: Vec<String>,
+    warning: String,
+}
+
+#[derive(Serialize)]
 struct RemotePullResult {
     ok: bool,
     message: String,
@@ -674,6 +684,93 @@ fn build_merge_safety_prediction(repo_path: &str) -> Result<MergeSafetyPredictio
         remote_files: remote_paths.into_iter().collect(),
         shared_files,
         working_changes,
+        warning,
+    })
+}
+
+
+
+fn fetch_configured_remote(repo_path: &str) -> Result<String, String> {
+    let upstream = current_upstream(repo_path)?;
+    let remote = remote_name_from_upstream(&upstream)
+        .ok_or_else(|| format!("Could not determine remote name from upstream: {}", upstream))?;
+
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(repo_path)
+        .args(["fetch", "--prune", &remote])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if out.status.success() {
+        Ok(format!("Fetched remote knowledge from {}.", remote))
+    } else {
+        Err(command_error("git fetch --prune <remote>", &out))
+    }
+}
+
+#[tauri::command]
+fn git_operation_state(repo_path: String) -> Result<GitOperationState, String> {
+    let git_dir_out = Command::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .args(["rev-parse", "--git-dir"])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !git_dir_out.status.success() {
+        return Err(command_error("git rev-parse --git-dir", &git_dir_out));
+    }
+
+    let git_dir_text = String::from_utf8_lossy(&git_dir_out.stdout).trim().to_string();
+    let git_dir = if std::path::Path::new(&git_dir_text).is_absolute() {
+        std::path::PathBuf::from(git_dir_text)
+    } else {
+        std::path::PathBuf::from(&repo_path).join(git_dir_text)
+    };
+
+    let rebase_in_progress = git_dir.join("rebase-merge").exists() || git_dir.join("rebase-apply").exists();
+    let merge_in_progress = git_dir.join("MERGE_HEAD").exists();
+    let cherry_pick_in_progress = git_dir.join("CHERRY_PICK_HEAD").exists();
+    let revert_in_progress = git_dir.join("REVERT_HEAD").exists();
+
+    let conflict_out = Command::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .args(["diff", "--name-only", "--diff-filter=U"])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !conflict_out.status.success() {
+        return Err(command_error("git diff --name-only --diff-filter=U", &conflict_out));
+    }
+
+    let conflicted_files: Vec<String> = String::from_utf8_lossy(&conflict_out.stdout)
+        .lines()
+        .map(|line| line.trim().to_string())
+        .filter(|line| !line.is_empty())
+        .collect();
+
+    let warning = if !conflicted_files.is_empty() {
+        "Git reports conflicted files. Resolve them manually or use Abort rebase if a rebase is in progress.".to_string()
+    } else if rebase_in_progress {
+        "Rebase is in progress. Continue only after verifying Git status.".to_string()
+    } else if merge_in_progress {
+        "Merge is in progress. Resolve or abort before starting another remote action.".to_string()
+    } else if cherry_pick_in_progress {
+        "Cherry-pick is in progress. Resolve or abort before starting another remote action.".to_string()
+    } else if revert_in_progress {
+        "Revert is in progress. Resolve or abort before starting another remote action.".to_string()
+    } else {
+        "No interrupted Git operation detected.".to_string()
+    };
+
+    Ok(GitOperationState {
+        rebase_in_progress,
+        merge_in_progress,
+        cherry_pick_in_progress,
+        revert_in_progress,
+        conflicted_files,
         warning,
     })
 }
@@ -1719,9 +1816,12 @@ fn git_pull_rebase_execute(repo_path: String, override_token: String) -> Result<
     let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
 
     if out.status.success() {
+        let fetch_note = fetch_configured_remote(&repo_path)
+            .unwrap_or_else(|err| format!("Post-pull fetch failed: {}", err));
+
         Ok(RemotePullResult {
             ok: true,
-            message: "Downloaded remote updates with git pull --rebase --autostash. Refresh state and inspect history.".to_string(),
+            message: format!("Downloaded remote updates with git pull --rebase --autostash. {} Refresh state and inspect history.", fetch_note),
             stdout,
             stderr,
         })
@@ -1775,6 +1875,7 @@ pub fn run() {
             detect_git,
             discover_git_repos,
             git_remote_status,
+            git_operation_state,
             git_fetch_remote,
             git_push_preview,
             git_pull_preview,
