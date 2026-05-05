@@ -84,6 +84,13 @@ type RemotePullResult = {
   stderr: string;
 };
 
+type RemotePushResult = {
+  ok: boolean;
+  message: string;
+  stdout: string;
+  stderr: string;
+};
+
 type MergeSafetyPrediction = {
   classification: string;
   risk_level: string;
@@ -271,7 +278,7 @@ function guardedRemoteActionBody(preview: RemoteOperationPreview) {
     ``,
     preview.operation === "download_updates_preview"
       ? `Important: confirming this will run git pull --rebase --autostash. If Git reports a conflict, use Abort rebase before trying another strategy.`
-      : `Important: real upload is not implemented in this panel yet. Confirming upload intention records the safety decision only.`,
+      : `Important: this first confirmation only acknowledges the upload preview. No Git push happens until you press Execute push after acknowledgement.`,
   ].join("\n");
 }
 
@@ -776,7 +783,24 @@ export default function App() {
   const [llmLog, setLlmLog] = useState<LlmLogEntry[]>([]);
   const [lastAction, setLastAction] = useState("No file-changing action performed in this session.");
   const [remotePreview, setRemotePreview] = useState<RemoteOperationPreview | null>(null);
+  const [armedRemoteUploadKey, setArmedRemoteUploadKey] = useState("");
   const [remoteBusy, setRemoteBusy] = useState("");
+
+  function remotePreviewKey(preview: RemoteOperationPreview) {
+    return [
+      preview.operation,
+      preview.branch,
+      preview.upstream || "none",
+      preview.ahead,
+      preview.behind,
+      preview.commit_count,
+      preview.changed_files.map((file) => `${file.status}:${file.path}`).join("|"),
+    ].join("::");
+  }
+
+  function isUploadPreviewArmed(preview: RemoteOperationPreview) {
+    return preview.operation === "upload_snapshots_preview" && armedRemoteUploadKey === remotePreviewKey(preview);
+  }
 
 
   function appendSystemLog(level: SystemLogEntry["level"], messageText: string) {
@@ -984,6 +1008,7 @@ export default function App() {
       const command = kind === "push" ? "git_push_preview" : "git_pull_preview";
       const result = await invoke<RemoteOperationPreview>(command, { repoPath });
       setRemotePreview(result);
+      setArmedRemoteUploadKey("");
     } catch (err) {
       setRemotePreview(null);
       setMessage(`${kind === "push" ? "Upload" : "Download"} preview failed: ${err}`);
@@ -992,6 +1017,30 @@ export default function App() {
     }
   }
 
+
+
+  async function executePush(preview: RemoteOperationPreview) {
+    try {
+      setRemoteBusy("push_execute");
+      setMessage("Running git push...");
+      const result = await invoke<RemotePushResult>("git_push_execute", {
+        repoPath,
+        overrideToken: guardedRemoteToken(preview),
+      });
+
+      setRemotePreview(null);
+      setArmedRemoteUploadKey("");
+      setMessage(`${result.message}${result.stdout ? ` stdout: ${result.stdout}` : ""}${result.stderr ? ` stderr: ${result.stderr}` : ""}`);
+      setLastAction(`${result.message} This shared local snapshots with the configured remote; inspect Remote state after refresh.`);
+      await refresh();
+      setHistoryRefreshTick((value) => value + 1);
+    } catch (err) {
+      setMessage(`Upload snapshots failed: ${err}`);
+      setLastAction("Upload snapshots failed. ChronoGit did not force push. Fetch remote knowledge and preview again before choosing another action.");
+    } finally {
+      setRemoteBusy("");
+    }
+  }
 
   async function executePullRebase(preview: RemoteOperationPreview) {
     try {
@@ -1020,6 +1069,7 @@ export default function App() {
       setRemoteBusy("abort_rebase");
       const result = await invoke<string>("git_rebase_abort", { repoPath });
       setRemotePreview(null);
+      setArmedRemoteUploadKey("");
       setMessage(result);
       setLastAction(result);
       await refresh();
@@ -1640,34 +1690,72 @@ export default function App() {
                 <span>{remoteSafetyGateText(remotePreview)}</span>
                 <em>{remoteRecommendedAction(remotePreview)}</em>
                 <div className="remote-safety-gate__policy">{guardedRemoteActionPolicy(remotePreview)}</div>
+                {remotePreview.operation === "upload_snapshots_preview" ? (
+                  <div className={`remote-upload-arm-state ${isUploadPreviewArmed(remotePreview) ? "remote-upload-arm-state--armed" : ""}`}>
+                    {isUploadPreviewArmed(remotePreview)
+                      ? "Step 2 ready: this exact preview is acknowledged. Execute push is now available."
+                      : "Step 1: acknowledge this preview. No push happens in step 1."}
+                  </div>
+                ) : null}
                 <button
                   className={remotePreview.merge_safety.risk_level === "HIGH" ? "danger-button" : ""}
                   onClick={() => {
                     const preview = remotePreview;
+                    const uploadArmed = isUploadPreviewArmed(preview);
+
                     setConfirmAction({
-                      title: guardedRemoteActionTitle(preview),
-                      body: guardedRemoteActionBody(preview),
-                      confirmLabel: guardedRemoteActionLabel(preview),
+                      title: preview.operation === "upload_snapshots_preview" && uploadArmed
+                        ? "Execute push: final confirmation"
+                        : guardedRemoteActionTitle(preview),
+                      body: preview.operation === "upload_snapshots_preview" && uploadArmed
+                        ? [
+                            "Requested action: execute git push",
+                            "",
+                            `Risk: ${preview.merge_safety.risk_level}`,
+                            `Classification: ${preview.merge_safety.classification}`,
+                            `Ahead / behind: +${preview.ahead} / -${preview.behind}`,
+                            "",
+                            "This will upload local snapshots to the configured remote.",
+                            "ChronoGit will not force push, pull, merge, or rebase.",
+                            "Working files should not be changed by this action.",
+                          ].join("\n")
+                        : guardedRemoteActionBody(preview),
+                      confirmLabel: preview.operation === "upload_snapshots_preview" && uploadArmed
+                        ? "Execute git push"
+                        : preview.operation === "upload_snapshots_preview"
+                          ? "Acknowledge preview only"
+                          : guardedRemoteActionLabel(preview),
                       danger: preview.merge_safety.risk_level === "HIGH",
                       requiredText: preview.merge_safety.risk_level === "HIGH" ? "override" : undefined,
                       requiredTextLabel: preview.merge_safety.risk_level === "HIGH" ? "Type override to intentionally continue despite HIGH risk." : undefined,
                       action: async () => {
                         if (preview.operation === "download_updates_preview") {
                           await executePullRebase(preview);
-                        } else {
-                          setLastAction(`${guardedRemoteActionTitle(preview)} acknowledged. Real upload is not implemented in this build.`);
-                          setMessage(`${guardedRemoteActionTitle(preview)} acknowledged. ChronoGit did not push or modify files.`);
+                          return;
                         }
+
+                        if (!uploadArmed) {
+                          setArmedRemoteUploadKey(remotePreviewKey(preview));
+                          setLastAction("Upload preview acknowledged. No push executed. Execute push is now available for this exact preview.");
+                          setMessage("Upload preview acknowledged. No push executed. Execute push is now available for this exact preview.");
+                          return;
+                        }
+
+                        await executePush(preview);
                       },
                     });
                     setConfirmText("");
                   }}
                 >
-                  {remotePreview.merge_safety.risk_level === "HIGH"
-                    ? "Override high-risk gate"
-                    : remotePreview.merge_safety.risk_level === "MEDIUM"
-                      ? "Confirm intention"
-                      : "Confirm low-risk intention"}
+                  {remotePreview.operation === "upload_snapshots_preview" && isUploadPreviewArmed(remotePreview)
+                    ? "Execute push (safe)"
+                    : remotePreview.operation === "upload_snapshots_preview"
+                      ? "Acknowledge preview only"
+                      : remotePreview.merge_safety.risk_level === "HIGH"
+                        ? "Override high-risk gate"
+                        : remotePreview.merge_safety.risk_level === "MEDIUM"
+                          ? "Confirm intention"
+                          : "Confirm low-risk intention"}
                 </button>
               </div>
             </div>

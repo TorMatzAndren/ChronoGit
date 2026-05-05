@@ -52,6 +52,14 @@ struct RemotePullResult {
 }
 
 #[derive(Serialize)]
+struct RemotePushResult {
+    ok: bool,
+    message: String,
+    stdout: String,
+    stderr: String,
+}
+
+#[derive(Serialize)]
 struct MergeSafetyPrediction {
     classification: String,
     risk_level: String,
@@ -1787,6 +1795,52 @@ DIFF:\n{}",
 }
 
 
+
+#[tauri::command]
+fn git_push_execute(repo_path: String, override_token: String) -> Result<RemotePushResult, String> {
+    let _upstream = current_upstream(&repo_path)?;
+    let (ahead, behind) = ahead_behind_against_upstream(&repo_path)?;
+    let merge_safety = build_merge_safety_prediction(&repo_path)?;
+
+    if ahead == 0 {
+        return Err("Upload blocked: this branch has no local snapshots ahead of the remote.".into());
+    }
+
+    if merge_safety.risk_level == "HIGH" && override_token.trim() != "override" {
+        return Err("Upload blocked: HIGH risk requires typing override.".into());
+    }
+
+    if (behind > 0 || merge_safety.risk_level == "MEDIUM") && !matches!(override_token.trim(), "confirm" | "override") {
+        return Err("Upload blocked: diverged or MEDIUM-risk upload requires explicit confirmation.".into());
+    }
+
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .arg("push")
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+
+    if out.status.success() {
+        Ok(RemotePushResult {
+            ok: true,
+            message: "Uploaded local snapshots with git push. Working files were not changed.".to_string(),
+            stdout,
+            stderr,
+        })
+    } else {
+        Err(format!(
+            "Upload failed during git push.\n\nstdout:\n{}\n\nstderr:\n{}\n\nChronoGit did not force push. Fetch remote knowledge and preview again before choosing another action.",
+            stdout,
+            stderr
+        ))
+    }
+}
+
+
 #[tauri::command]
 fn git_pull_rebase_execute(repo_path: String, override_token: String) -> Result<RemotePullResult, String> {
     let _upstream = current_upstream(&repo_path)?;
@@ -1879,6 +1933,7 @@ pub fn run() {
             git_fetch_remote,
             git_push_preview,
             git_pull_preview,
+            git_push_execute,
             git_pull_rebase_execute,
             git_rebase_abort,
             git_status,
