@@ -5,7 +5,7 @@ Author: Matz
 Type: scripts
 Subsystem: control-api
 Updated: 2026-05-05
-Revision: 2
+Revision: 3
 
 ---
 
@@ -17,12 +17,15 @@ Revision: 2
 @semantic:git-status
 @semantic:git-mutation
 @semantic:git-temporal
+@semantic:git-commit-comparison
+@semantic:git-file-history
 @semantic:git-remote-awareness
 @semantic:git-remote-preview
 @semantic:merge-safety-prediction
 @semantic:operation-state-detection
 @semantic:tauri-command-layer
 @semantic:llm-local
+@semantic:llm-comparison-explanation
 @semantic:gpu-control
 @semantic:external-url-allowlist
 @state:active
@@ -30,9 +33,9 @@ Revision: 2
 # lib.rs
 
 **Date:** 2026-05-04  
-**Summary:** Tauri backend command layer for ChronoGit. Executes Git operations, parses deterministic Git state, enforces path and mutation safety, provides remote preview/execution commands, detects interrupted Git operations, and integrates local Ollama explanations with GPU power limiting.  
-**Keywords:** tauri backend, git command layer, git parser, remote preview, merge safety, local llm, ollama integration  
-**Tags:** scripts, backend, control-api, git, tauri, llm, remote-sync
+**Summary:** Tauri backend command layer for ChronoGit. Executes Git operations, parses deterministic Git state, enforces path and mutation safety, provides Time Machine diff/comparison commands, provides remote preview/execution commands, detects interrupted Git operations, and integrates local Ollama explanations with GPU power limiting.  
+**Keywords:** tauri backend, git command layer, git parser, commit comparison, selected diff explanation, remote preview, merge safety, local llm, ollama integration  
+**Tags:** scripts, backend, control-api, git, tauri, llm, remote-sync, focus-mode
 
 Execution and truth layer for ChronoGit.
 
@@ -50,6 +53,7 @@ Ensures:
 - validated mutation inputs
 - deterministic Git truth extraction
 - guarded Git mutation
+- safe commit-reference validation
 - allowlisted external URL opening
 - local-only LLM integration
 
@@ -287,12 +291,16 @@ Commands:
 - `git_changed_files_from_commit`
 - `git_diff_file_from_commit`
 - `git_restore_file_from_commit`
+- `git_compare_commits`
+- `git_file_history`
 
 Capabilities:
 
 - read last 50 commits
 - list changed files per commit
 - extract selected file diff
+- compare two selected commits
+- collect file history across renames
 - restore one selected file from one selected commit into the working folder
 
 Commands used include:
@@ -300,6 +308,7 @@ Commands used include:
 - `git log`
 - `git diff-tree`
 - `git show`
+- `git diff`
 - `git checkout <commit> -- <path>`
 
 Constraint:
@@ -308,7 +317,96 @@ No full repository rollback is implemented. Restore is file-level only.
 
 ---
 
-### 8. Remote Preview Layer
+### 8. Commit Reference Validation
+
+Function:
+
+- `validate_commitish`
+
+Validation rules:
+
+- commit reference must not be empty
+- commit reference must not start with `-`
+- commit reference must not contain whitespace
+- commit reference must resolve through `git rev-parse --verify <value>^{commit}`
+
+Used by:
+
+- `git_diff_file_from_commit`
+- `git_compare_commits`
+- `git_restore_file_from_commit`
+
+This prevents arbitrary option-like values from being treated as commit references.
+
+---
+
+### 9. A ↔ B Commit Comparison
+
+Command:
+
+- `git_compare_commits`
+
+Inputs:
+
+- repository path
+- left commit
+- right commit
+
+Validation:
+
+- both commit references must pass `validate_commitish`
+- left and right commit must differ
+
+Git commands:
+
+- `git diff --name-status --find-renames --find-copies A B`
+- `git diff --numstat A B`
+- `git diff --find-renames --find-copies A B`
+- `git log -1 --pretty=format:%h %s`
+
+Returns:
+
+- left commit
+- right commit
+- left label
+- right label
+- changed files
+- insertion count
+- deletion count
+- full diff
+
+This provides the backend truth for Focus Mode A ↔ B comparison.
+
+---
+
+### 10. File History
+
+Command:
+
+- `git_file_history`
+
+Uses:
+
+- `git log --follow --name-status --pretty=format:COMMIT... -- <path>`
+
+Returns:
+
+- commit hash
+- short hash
+- author
+- timestamp
+- message
+- file status
+- path
+
+Current status:
+
+- backend implemented
+- UI surface not yet implemented
+
+---
+
+### 11. Remote Preview Layer
 
 Commands:
 
@@ -350,7 +448,7 @@ Preview commands do not push, pull, merge, rebase, or modify working files.
 
 ---
 
-### 9. Merge Safety Prediction
+### 12. Merge Safety Prediction
 
 Function:
 
@@ -395,7 +493,7 @@ This is a prediction only. Git remains authoritative.
 
 ---
 
-### 10. Remote Execution Layer
+### 13. Remote Execution Layer
 
 Commands:
 
@@ -426,13 +524,14 @@ Commands:
 
 ---
 
-### 11. LLM Integration / Ollama
+### 14. LLM Integration / Ollama
 
 Commands:
 
 - `list_local_llm_models`
 - `explain_diff_with_ollama`
 - `explain_context_with_ollama`
+- `explain_comparison_with_ollama`
 
 Ollama endpoints:
 
@@ -450,7 +549,95 @@ LLM output is cleaned by:
 
 ---
 
-### 12. GPU Power Management
+### 15. Diff Explanation
+
+Command:
+
+- `explain_diff_with_ollama`
+
+Used for:
+
+- selected file diff explanation
+- selected hunk-line explanation
+
+Special behavior:
+
+- rejects empty diffs
+- validates local model existence
+- applies lockfile summarization when appropriate
+- clips diff input before model call
+- applies GPU TDP guard
+- returns structured explanation and TDP readings
+
+Prompt constraints include:
+
+- explain only selected diff
+- do not invent context
+- claims must be grounded in changed lines
+- do not claim cloud, telemetry, security, platform, or build problems unless visible
+- mention safety/mutation/Git state only when visible
+
+---
+
+### 16. Context Explanation
+
+Command:
+
+- `explain_context_with_ollama`
+
+Used for:
+
+- UI concept explanation
+- system log explanation
+- remote/preflight help
+
+Prompt constraints include:
+
+- explain supplied UI context and raw truth only
+- ChronoGit is local-only
+- Git truth and deterministic UI state are authoritative
+- use ChronoGit UI terms first
+- do not recommend terminal commands unless the UI cannot perform the action
+- never recommend `git reset --hard` unless explicitly requested
+
+---
+
+### 17. A ↔ B Comparison Explanation
+
+Command:
+
+- `explain_comparison_with_ollama`
+
+Inputs:
+
+- model
+- left label
+- right label
+- file count
+- insertions
+- deletions
+- changed files text
+- diff
+
+Purpose:
+
+Provides a specialized explanation path for A ↔ B comparison.
+
+Prompt constraints include:
+
+- explain exact A ↔ B Git diff
+- do not give a generic ChronoGit or architecture summary
+- explain only visible comparison stats, changed-file list, and diff
+- do not claim replacement unless diff explicitly removes old behavior or reroutes all callers
+- classify important changes as additive, modifying existing behavior, replacing existing behavior, or removing behavior
+- prioritize biggest code movements and user-visible behavior changes
+- Git diff remains authoritative
+
+This command was added because generic diff explanations were too broad and repeatedly inferred replacement or architecture-level meaning that was not proven by the diff.
+
+---
+
+### 18. GPU Power Management
 
 Functions:
 
@@ -473,7 +660,7 @@ Failure to adjust power does not automatically block explanation generation; it 
 
 ---
 
-### 13. Diff Preprocessing
+### 19. Diff Preprocessing
 
 Functions:
 
@@ -499,8 +686,11 @@ From UI:
 - file path
 - commit hash
 - commit message
+- comparison commit A
+- comparison commit B
 - remote override/confirm token
 - diff content
+- changed-file list text
 - LLM model name
 - explanation kind/title/context/raw truth
 - external URL
@@ -523,6 +713,8 @@ Structured responses:
 - `HistoryCommit[]`
 - `ChangedFile[]`
 - `DiffResult`
+- `CommitComparison`
+- `FileHistoryEntry[]`
 - `ExplainDiffResult`
 - `LocalModel[]`
 
@@ -534,18 +726,20 @@ Acts as:
 
 → deterministic Git truth extraction engine  
 → safe Git mutation boundary  
+→ Time Machine truth provider  
+→ commit comparison provider  
 → remote preview and execution controller  
 → operation-state detector  
 → local LLM integration controller  
 → GPU power guard  
-→ allowlisted external URL opener
+→ allowlisted external URL opener  
 
 Bridges:
 
 React UI ↔ Git CLI  
 React UI ↔ Ollama  
 React UI ↔ OS default browser  
-React UI ↔ NVIDIA power limit control
+React UI ↔ NVIDIA power limit control  
 
 ---
 
@@ -554,6 +748,7 @@ React UI ↔ NVIDIA power limit control
 - no raw shell exposure to UI
 - no arbitrary command execution
 - all path mutations validated
+- commit references validated before use
 - Git CLI is source of truth
 - remote preview separated from remote execution
 - force push is not implemented
@@ -561,18 +756,19 @@ React UI ↔ NVIDIA power limit control
 - destructive actions return explicit messages
 - interrupted Git operations are detectable
 - external URLs are allowlisted
+- comparison explanation uses stricter prompt constraints than generic diff explanation
 
 ---
 
 ## Current Known Gaps
 
-- no A ↔ B comparison backend yet
-- no file evolution backend yet
+- file history backend exists but is not surfaced in the UI
 - no commit graph backend yet
 - no built-in conflict resolution engine
 - no branch creation/switching UI commands
 - no stash commands
 - no advanced diff options such as ignore whitespace or side-by-side diff generation
+- duplicated LLM power-limit wrapper logic could later be refactored into a shared helper
 
 ---
 

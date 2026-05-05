@@ -5,7 +5,7 @@ Author: Matz
 Type: scripts
 Subsystem: workspace-ui
 Updated: 2026-05-05
-Revision: 2
+Revision: 3
 
 ---
 
@@ -20,6 +20,10 @@ Revision: 2
 @semantic:git-status-visualization
 @semantic:git-flow
 @semantic:git-temporal-ui
+@semantic:focus-mode
+@semantic:focus-projection
+@semantic:commit-comparison-ui
+@semantic:selected-diff-hunk-explanation
 @semantic:commit-preflight
 @semantic:remote-awareness-ui
 @semantic:remote-preview-ui
@@ -36,9 +40,9 @@ Revision: 2
 # App.tsx
 
 **Date:** 2026-05-04  
-**Summary:** React-based ChronoGit UI providing Git state visualization, safe mutation controls, commit preflight, Time Machine history inspection, remote sync preview/execution controls, operation-state warnings, persistent logs, auto-refresh, and optional local LLM explanations.  
-**Keywords:** git ui, git visualization, tauri frontend, git flow interface, time machine ui, remote preview, system log, llm explanation  
-**Tags:** scripts, ui, git, workspace, tauri, llm, remote-sync
+**Summary:** React-based ChronoGit UI providing Git state visualization, safe mutation controls, commit preflight, Time Machine history inspection, Focus Mode projection, A ↔ B snapshot comparison, selectable diff hunk explanation, remote sync preview/execution controls, operation-state warnings, persistent logs, auto-refresh, and optional local LLM explanations.  
+**Keywords:** git ui, git visualization, tauri frontend, focus mode, commit comparison, selected diff explanation, time machine ui, remote preview, system log, llm explanation  
+**Tags:** scripts, ui, git, workspace, tauri, focus-mode, llm, remote-sync
 
 Frontend surface for ChronoGit.
 
@@ -56,8 +60,10 @@ The UI emphasizes:
 - explicit consequences
 - guarded mutation
 - local-only execution
+- contextual Focus Mode projection
 - advisory LLM explanations
 - beginner-mode hover guidance
+- power-user inspection without permanently expanding the main surface
 
 ---
 
@@ -103,6 +109,7 @@ Displays:
 - risk class
 - backend explanation
 - expandable local explanation
+- optional local LLM explanation
 
 ---
 
@@ -119,6 +126,14 @@ Triggers backend operations via Tauri invoke:
 Destructive or semi-destructive actions use confirmation modals.
 
 The UI does not perform direct filesystem or shell mutation. All mutation routes through the backend command layer.
+
+Special handling exists for `git_remove_untracked`:
+
+- the removed path is optimistically removed from the local UI state after backend success
+- expanded local state for that path is cleared
+- full app state is then refreshed from Git truth
+
+This fixed the previous reload-feeling behavior after removing untracked files.
 
 ---
 
@@ -152,6 +167,7 @@ Provides linear history inspection through:
 - `git_changed_files_from_commit`
 - `git_diff_file_from_commit`
 - `git_restore_file_from_commit`
+- `git_compare_commits`
 
 Capabilities:
 
@@ -159,7 +175,11 @@ Capabilities:
 - changed-file list per commit
 - file diff viewer
 - explicit diff scope card
-- LLM diff explanation
+- Focus Mode state projection
+- A ↔ B commit comparison
+- complete comparison diff copy
+- full diff explanation
+- selected hunk-line explanation
 - single-file restore from selected snapshot
 
 Constraint:
@@ -168,7 +188,95 @@ Restore from Time Machine modifies the working folder only. It does not automati
 
 ---
 
-### 6. Remote Awareness and Remote Preview UI
+### 6. Focus Mode
+
+Focus Mode is now represented in the UI through `FocusProjection`.
+
+Projection variants:
+
+- `none`
+- `commit`
+- `file`
+- `comparison`
+
+Focus Mode shows:
+
+- current focus type
+- current focused entity
+- comparison/file/commit facts
+- context-appropriate actions
+- Beginner Mode or Advanced Mode terminology
+
+Focus Mode currently acts as a contextual truth projection above the Time Machine area.
+
+It is not yet the full future customizable panel workspace, but it establishes the first implemented Focus surface.
+
+---
+
+### 7. A ↔ B Commit Comparison
+
+The UI supports selecting one snapshot as A and comparing another selected snapshot as B.
+
+State:
+
+- `compareBase`
+- `comparison`
+
+Flow:
+
+1. select snapshot
+2. set it as A
+3. select another snapshot
+4. compare A → B
+5. inspect changed files, insertions, deletions, and full diff
+
+Backend command:
+
+- `git_compare_commits`
+
+LLM command:
+
+- `explain_comparison_with_ollama`
+
+Comparison explanation uses a specialized backend prompt that tells the model:
+
+- this is A ↔ B comparison
+- do not summarize ChronoGit generally
+- do not claim replacement unless the diff proves replacement
+- classify changes as additive/modifying/replacing/removing
+- explain only supplied diff and changed-file truth
+
+---
+
+### 8. Selected Diff Hunk-Line Explanation
+
+The diff renderer now supports selecting diff lines.
+
+Click behavior:
+
+- clicking a line selects the complete surrounding diff hunk when possible
+- clicking the selected hunk again deselects it
+
+Functions:
+
+- `hunkLineNumbersForLine`
+- `toggleDiffLine`
+- `selectedDiffText`
+- `copySelectedDiffLines`
+- `explainSelectedDiffLines`
+
+Selected diff explanation sends only the selected subset to `explain_diff_with_ollama` with explicit context:
+
+- selected diff lines only
+- subset of a larger diff
+- explain only selected lines
+- do not infer hidden context
+
+This creates a focused LLM workflow for explaining only the relevant hunk instead of an entire large diff.
+
+---
+
+### 9. Remote Awareness and Remote Preview UI
 
 Displays remote state from `GitRemoteStatus`:
 
@@ -204,7 +312,7 @@ The remote preview panel displays:
 
 ---
 
-### 7. Remote Execution Controls
+### 10. Remote Execution Controls
 
 The UI supports guarded remote execution:
 
@@ -223,7 +331,7 @@ The UI distinguishes preview from execution and logs action results.
 
 ---
 
-### 8. Operation State Detection UI
+### 11. Operation State Detection UI
 
 Consumes `GitOperationState` through `git_operation_state`.
 
@@ -239,7 +347,7 @@ Provides an Abort Rebase button when rebase state is detected.
 
 ---
 
-### 9. Auto-Refresh
+### 12. Auto-Refresh
 
 Uses a polling loop and deterministic state signature to detect repository changes.
 
@@ -262,7 +370,7 @@ Transient refresh-start messages are not logged. Repository-change detections ar
 
 ---
 
-### 10. System Log
+### 13. System Log
 
 Maintains a persistent localStorage-backed system log.
 
@@ -284,7 +392,7 @@ The system log records deterministic ChronoGit session events, not Git history.
 
 ---
 
-### 11. LLM Response Log
+### 14. LLM Response Log
 
 Maintains a persistent localStorage-backed LLM log.
 
@@ -297,21 +405,28 @@ Sources include:
 
 LLM outputs are advisory and shown separately from deterministic system events.
 
+When a new LLM response is added, the UI deterministically scrolls the LLM dock into view and briefly pulses the dock.
+
+This behavior helps the user find the response after long-running local LLM work.
+
 ---
 
-### 12. Local LLM UI Layer
+### 15. Local LLM UI Layer
 
 Uses backend commands:
 
 - `list_local_llm_models`
 - `explain_diff_with_ollama`
 - `explain_context_with_ollama`
+- `explain_comparison_with_ollama`
 
 The UI supports:
 
 - model discovery
 - model selection
-- diff explanation
+- full diff explanation
+- A ↔ B comparison explanation
+- selected hunk-line explanation
 - UI/system-state explanation
 - log-entry explanation
 - LLM response persistence
@@ -322,7 +437,7 @@ LLM output is advisory. Git state and deterministic UI data remain authoritative
 
 ---
 
-### 13. Beginner Mode
+### 16. Beginner Mode
 
 Beginner Mode controls:
 
@@ -330,6 +445,7 @@ Beginner Mode controls:
 - teaching-language button/tooltips
 - beginner help text in remote preview
 - action explanation icons
+- Focus Mode terminology
 
 Beginner Mode does not alter backend behavior or Git truth.
 
@@ -355,6 +471,7 @@ From backend via invoke:
 - `HistoryCommit[]`
 - `ChangedFile[]`
 - `DiffResult`
+- `CommitComparison`
 - `ExplainDiffResult`
 - `LocalModel[]`
 
@@ -386,10 +503,12 @@ User-triggered backend commands:
 - `git_history`
 - `git_changed_files_from_commit`
 - `git_diff_file_from_commit`
+- `git_compare_commits`
 - `git_restore_file_from_commit`
 - `list_local_llm_models`
 - `explain_diff_with_ollama`
 - `explain_context_with_ollama`
+- `explain_comparison_with_ollama`
 
 ---
 
@@ -399,9 +518,10 @@ Acts as:
 
 → User cognition layer for Git  
 → Safe control interface  
+→ Focus projection layer  
 → Visualization surface for deterministic backend truth  
 → Advisory LLM explanation surface  
-→ Session event observatory
+→ Session event observatory  
 
 Depends on:
 
@@ -424,6 +544,8 @@ Depends on:
 - keep LLM advisory
 - avoid panel creep
 - prefer state transparency over magic
+- project deeper truth contextually instead of permanently showing everything
+- support beginners and advanced users through language and focus, not behavior forks
 
 ---
 
@@ -442,7 +564,10 @@ It defines:
 - current state card
 - remote card
 - Time Machine layout
-- diff rendering
+- Focus Mode surface
+- comparison summary
+- selectable diff-line rendering
+- selected diff-line highlight behavior
 - diff scope card
 - preflight modal
 - confirmation modal
@@ -467,12 +592,13 @@ The stylesheet does not perform logic or system actions.
 
 ## Current Known Gaps
 
-- no A ↔ B commit comparison yet
+- file history backend exists but is not yet surfaced in the UI
 - no commit graph yet
-- no file evolution view yet
 - no complete dual-language terminology layer yet
 - no built-in conflict resolution editor
-- Time Machine is currently linear commit inspection
+- no customizable Git Workspace tab/panel framework yet
+- Time Machine remains mostly linear, though A ↔ B comparison now exists
+- selected hunk behavior is implemented, but future UI could make hunk boundaries more visually explicit
 
 ---
 
