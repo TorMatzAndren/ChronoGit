@@ -2619,3 +2619,217 @@ p {
   color: #dfffee;
   font-weight: 800;
 }
+
+/* Major top-surface cleanup */
+.hero--compact {
+  align-items: stretch;
+}
+
+.product-title-card {
+  min-width: 240px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1px solid rgba(100, 240, 200, 0.18);
+  background:
+    radial-gradient(circle at top left, rgba(100, 240, 200, 0.10), transparent 14rem),
+    rgba(0, 0, 0, 0.20);
+  border-radius: 16px;
+}
+
+.jarri-logo {
+  width: 56px;
+  height: 56px;
+  object-fit: contain;
+  flex: 0 0 auto;
+  filter: drop-shadow(0 0 12px rgba(100, 240, 200, 0.18));
+}
+
+.product-title-card h1 {
+  margin: 2px 0 0;
+  line-height: 1;
+}
+
+.product-title-card .eyebrow {
+  margin: 0;
+}
+
+.hero--compact .hero-text {
+  display: none;
+}
+
+.state-dashboard {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.current-state-card {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.1fr) minmax(260px, 1fr) minmax(360px, 1.4fr);
+  gap: 8px;
+  align-items: stretch;
+  padding: 10px;
+  border-radius: 14px;
+  border: 1px solid rgba(117, 183, 255, 0.16);
+  background:
+    linear-gradient(90deg, rgba(117, 183, 255, 0.055), rgba(100, 240, 200, 0.035)),
+    rgba(0, 0, 0, 0.18);
+}
+
+.current-state-card__label {
+  color: #75b7ff;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 10px;
+  font-weight: 900;
+  margin-bottom: 3px;
+}
+
+.current-state-card h2 {
+  margin: 0 0 4px;
+  font-size: 20px;
+}
+
+.current-state-card p {
+  margin: 0;
+  color: #c8d2e2;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.current-state-card__facts {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 5px;
+}
+
+.current-state-card__facts span,
+.current-state-card__last {
+  display: grid;
+  gap: 2px;
+  padding: 7px 8px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.24);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  min-width: 0;
+}
+
+.current-state-card__facts strong,
+.current-state-card__last strong {
+  color: #8f9aae;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  font-size: 9px;
+}
+
+.current-state-card__facts span {
+  color: #e8edf7;
+  font-size: 12px;
+  word-break: break-word;
+}
+
+.current-state-card__last span {
+  color: #d7dde7;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.flow-strip--compact {
+  margin-top: 8px;
+  margin-bottom: 8px;
+}
+
+.flow-strip--compact .flow-step {
+  min-height: unset;
+  padding: 10px 12px;
+}
+
+.flow-strip--compact .flow-step strong {
+  font-size: 13px;
+}
+
+.flow-strip--compact .flow-step span {
+  font-size: 11px;
+}
+
+@media (max-width: 1200px) {
+  .current-state-card {
+    grid-template-columns: 1fr;
+  }
+
+  .product-title-card {
+    min-width: 0;
+  }
+}
+
+
+/* Larger Jarri logo */
+.jarri-logo--large {
+  width: 132px;
+  height: 72px;
+  object-fit: contain;
+  filter: drop-shadow(0 0 16px rgba(100, 240, 200, 0.25));
+  transition: transform 0.15s ease;
+}
+
+.jarri-logo--large:hover {
+  transform: scale(1.05);
+}
+
+/* Title block */
+.product-title-text {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.product-title-text h1 {
+  margin: 0;
+  font-size: 28px;
+  line-height: 1.1;
+}
+
+/* GitHub link */
+.github-link {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #75b7ff;
+  text-decoration: none;
+  opacity: 0.85;
+}
+
+.github-link:hover {
+  opacity: 1;
+  text-decoration: underline;
+}
+
+
+/* External brand buttons */
+.brand-link-button {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+}
+
+.brand-link-button--logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.product-title-card {
+  min-width: 360px;
+}
+
+.github-link {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  width: fit-content;
+  cursor: pointer;
+  font-family: inherit;
+}

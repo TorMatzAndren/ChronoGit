@@ -136,6 +136,47 @@ struct DiffResult {
     diff: String,
 }
 
+
+#[tauri::command]
+fn open_external_url(url: String) -> Result<String, String> {
+    let allowed = [
+        "http://jarri.systems",
+        "https://github.com/TorMatzAndren",
+    ];
+
+    if !allowed.iter().any(|allowed_url| *allowed_url == url) {
+        return Err(format!("External URL blocked by ChronoGit allowlist: {}", url));
+    }
+
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut cmd = Command::new("cmd");
+        cmd.args(["/C", "start", "", &url]);
+        cmd
+    };
+
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut cmd = Command::new("open");
+        cmd.arg(&url);
+        cmd
+    };
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut command = {
+        let mut cmd = Command::new("xdg-open");
+        cmd.arg(&url);
+        cmd
+    };
+
+    command
+        .spawn()
+        .map_err(|e| format!("Could not open external browser: {}", e))?;
+
+    Ok(format!("Opened external browser: {}", url))
+}
+
+
 #[tauri::command]
 fn detect_git() -> Result<String, String> {
     let output = Command::new("git")
@@ -1927,6 +1968,7 @@ pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             detect_git,
+            open_external_url,
             discover_git_repos,
             git_remote_status,
             git_operation_state,

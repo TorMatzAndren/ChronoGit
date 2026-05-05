@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import "./App.css";
+import jarriLogo from "./assets/jarri-logo.png";
 
 type FileChange = {
   path: string;
@@ -1356,14 +1357,33 @@ export default function App() {
 
   return (
     <main className="app-shell">
-      <header className="hero">
-        <div>
-          <div className="eyebrow">Local-only Git time machine</div>
-          <h1>ChronoGit</h1>
-          <p className="hero-text">
-            ChronoGit explains Git as a safe flow: working files become prepared changes,
-            and prepared changes become a snapshot when committed.
-          </p>
+      <header className="hero hero--compact">
+        <div className="product-title-card">
+          <button
+            className="brand-link-button brand-link-button--logo"
+            title="Open Jarri website in your default browser"
+            onClick={async () => {
+              const result = await invoke<string>("open_external_url", { url: "http://jarri.systems" });
+              setMessage(result);
+            }}
+          >
+            <img src={jarriLogo} alt="Jarri" className="jarri-logo jarri-logo--large" />
+          </button>
+
+          <div className="product-title-text">
+            <h1>ChronoGit</h1>
+
+            <button
+              className="github-link"
+              title="Open GitHub profile in your default browser"
+              onClick={async () => {
+                const result = await invoke<string>("open_external_url", { url: "https://github.com/TorMatzAndren" });
+                setMessage(result);
+              }}
+            >
+              GitHub ↗
+            </button>
+          </div>
         </div>
 
         <div className="hero-side">
@@ -1498,44 +1518,33 @@ export default function App() {
         </div>
       </header>
 
-      {beginnerMode ? (
-        <section className="learning-note">
-          <strong>Beginner rule:</strong> Preparing a file does not commit it. It only marks it for the next snapshot.
-          Removing a file from the next commit does not delete it. Restore/discard is the dangerous action.
+      <section className="state-dashboard">
+        <section className={`truth-strip truth-strip--${remoteStateClass(remoteStatus)}`}>
+          <div title="Working-folder changes are files changed on disk but not prepared for the next commit."><strong>Working</strong><span>{data.working.length}</span></div>
+          <div title="Prepared changes are staged files that will be included if you commit now."><strong>Prepared</strong><span>{data.staged.length}</span></div>
+          <div title="Remote shows whether your local branch is synced with its remote tracking branch."><strong>Remote</strong><span>{remoteTruthText(remoteStatus)}</span></div>
+          <div title="State summarizes the local/remote relationship."><strong>State</strong><span>{remoteStateLabel(remoteStatus)}</span></div>
         </section>
-      ) : null}
 
-      <section className={`truth-strip truth-strip--${remoteStateClass(remoteStatus)}`}>
-        <div title="Working-folder changes are files changed on disk but not prepared for the next commit."><strong>Working</strong><span>{data.working.length}</span></div>
-        <div title="Prepared changes are staged files that will be included if you commit now."><strong>Prepared</strong><span>{data.staged.length}</span></div>
-        <div title="Remote shows whether your local branch is synced with its remote tracking branch."><strong>Remote</strong><span>{remoteTruthText(remoteStatus)}</span></div>
-        <div title="State summarizes the local/remote relationship."><strong>State</strong><span>{remoteStateLabel(remoteStatus)}</span></div>
-      </section>
+        <div className="current-state-card">
+          <div>
+            <div className="current-state-card__label">Current state</div>
+            <h2>{remoteStateLabel(remoteStatus)}</h2>
+            <p>{explainRemoteHuman(remoteStatus)}</p>
+          </div>
 
-      {beginnerMode ? (
-        <section className="truth-meaning">
-          <strong>Remote meaning:</strong> {explainRemoteHuman(remoteStatus)}
-        </section>
-      ) : null}
+          <div className="current-state-card__facts">
+            <span><strong>Repo</strong>{repos.find((repo) => repo.path === repoPath)?.name || "Selected repository"}</span>
+            <span><strong>Branch</strong>{remoteStatus?.branch || data.branch}</span>
+            <span><strong>Upstream</strong>{remoteStatus?.upstream || "none"}</span>
+          </div>
 
-      <section className="safety-strip">
-        <div>
-          <strong>Last action</strong>
-          <span>{lastAction}</span>
+          <div className="current-state-card__last">
+            <strong>Last action</strong>
+            <span>{lastAction}</span>
+          </div>
         </div>
       </section>
-
-      <section className="git-visibility-note">
-        <div>
-          <strong>Untracked</strong>
-          <span>Git sees these files in the folder, but they are not part of history unless prepared.</span>
-        </div>
-        <div>
-          <strong>Ignored</strong>
-          <span>Git is configured not to show these paths in normal status. They are hidden from normal ChronoGit change lists.</span>
-        </div>
-      </section>
-
 
       {operationState && hasInterruptedOperation(operationState) ? (
         <section className={`operation-state-banner operation-state-banner--${operationStateClass(operationState)}`}>
@@ -1560,20 +1569,20 @@ export default function App() {
         </section>
       ) : null}
 
-      <section className="flow-strip">
+      <section className="flow-strip flow-strip--compact">
         <div className="flow-step">
-          <strong>1. Working files</strong>
-          <span>Files changed in your folder, but not necessarily part of the next snapshot.</span>
+          <strong>Working files</strong>
+          <span>{data.working.length} not prepared</span>
         </div>
         <div className="flow-arrow">→</div>
         <div className="flow-step">
-          <strong>2. Prepared changes</strong>
-          <span>These are staged. They will be included if you commit now.</span>
+          <strong>Prepared changes</strong>
+          <span>{data.staged.length} ready for snapshot</span>
         </div>
         <div className="flow-arrow">→</div>
         <div className="flow-step flow-step--locked">
-          <strong>3. Snapshot</strong>
-          <span>Commit must pass Jarri safety preflight first.</span>
+          <strong>Snapshot</strong>
+          <span>{data.staged.length ? "Review preflight next" : "Prepare files first"}</span>
         </div>
       </section>
 
