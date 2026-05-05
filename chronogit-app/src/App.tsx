@@ -464,18 +464,36 @@ type ConfirmAction = {
   requiredTextLabel?: string;
 };
 
+type SystemLogEntry = {
+  id: string;
+  timestamp: string;
+  level: "info" | "warning" | "error" | "action";
+  message: string;
+};
+
+type LlmLogEntry = {
+  id: string;
+  timestamp: string;
+  source: "diff" | "ui" | "remote" | "preflight";
+  model: string;
+  title: string;
+  content: string;
+};
+
 function Timeline({
   repoPath,
   refreshTick,
   setConfirmAction,
   llmEngine,
   llmModel,
+  appendLlmEntry,
 }: {
   repoPath: string;
   refreshTick: number;
   setConfirmAction: (action: ConfirmAction | null) => void;
   llmEngine: string;
   llmModel: string;
+  appendLlmEntry: (entry: Omit<LlmLogEntry, "id" | "timestamp">) => void;
 }) {
   const [history, setHistory] = useState<HistoryCommit[]>([]);
   const [selected, setSelected] = useState<HistoryCommit | null>(null);
@@ -563,7 +581,13 @@ function Timeline({
       });
       setExplainStatus(`Local ${result.model} finished. GPU TDP: ${result.tdp_before_watts}W → ${result.tdp_active_watts}W → ${result.tdp_reset_watts}W.`);
       setExplainText(result.explanation || "Qwen returned an empty explanation.");
-      setExplainOpen(true);
+      appendLlmEntry({
+        source: "diff",
+        model: result.model,
+        title: selectedFile ? `Diff explanation: ${selectedFile.path}` : "Diff explanation",
+        content: result.explanation || "Qwen returned an empty explanation.",
+      });
+      setExplainOpen(false);
       setError("");
     } catch (err) {
       setExplainText("");
@@ -677,7 +701,7 @@ function Timeline({
             </div>
           ) : null}
 
-          {(explainText || explainStatus) ? (
+          {false ? (
             <div className="ollama-chat">
               <div className="ollama-chat__title">Local LLM · Experimental explanation</div>
               {explainStatus ? <div className="ollama-chat__status">{explainStatus}</div> : null}
@@ -738,9 +762,51 @@ export default function App() {
   const [uiExplainBusy, setUiExplainBusy] = useState(false);
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
   const [confirmText, setConfirmText] = useState("");
+  const [systemLog, setSystemLog] = useState<SystemLogEntry[]>([]);
+  const [llmLog, setLlmLog] = useState<LlmLogEntry[]>([]);
   const [lastAction, setLastAction] = useState("No file-changing action performed in this session.");
   const [remotePreview, setRemotePreview] = useState<RemoteOperationPreview | null>(null);
   const [remoteBusy, setRemoteBusy] = useState("");
+
+
+  function appendSystemLog(level: SystemLogEntry["level"], messageText: string) {
+    const trimmed = messageText.trim();
+    if (!trimmed) return;
+
+    setSystemLog((entries) => [
+      ...entries.slice(-119),
+      {
+        id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        timestamp: new Date().toLocaleTimeString(),
+        level,
+        message: trimmed,
+      },
+    ]);
+  }
+
+  function appendLlmEntry(entry: Omit<LlmLogEntry, "id" | "timestamp">) {
+    const content = entry.content.trim();
+    if (!content) return;
+
+    setLlmLog((entries) => [
+      ...entries.slice(-49),
+      {
+        id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        timestamp: new Date().toLocaleTimeString(),
+        ...entry,
+        content,
+      },
+    ]);
+  }
+
+  function logLevelFromMessage(messageText: string): SystemLogEntry["level"] {
+    const lower = messageText.toLowerCase();
+
+    if (lower.includes("failed") || lower.includes("error") || lower.includes("blocked")) return "error";
+    if (lower.includes("warning") || lower.includes("danger") || lower.includes("risk")) return "warning";
+    if (lower.includes("created") || lower.includes("prepared") || lower.includes("removed") || lower.includes("restored") || lower.includes("fetched") || lower.includes("downloaded")) return "action";
+    return "info";
+  }
 
   async function refresh(path = repoPath) {
     const [statusResult, remoteResult] = await Promise.all([
@@ -794,6 +860,12 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem("chronogit_beginner_mode", beginnerMode ? "on" : "off");
   }, [beginnerMode]);
+
+  useEffect(() => {
+    if (message.trim()) {
+      appendSystemLog(logLevelFromMessage(message), message);
+    }
+  }, [message]);
 
   async function executeAction(action: "git_stage" | "git_unstage" | "git_restore" | "git_remove_untracked" | "git_ignore_path", path: string) {
     try {
@@ -996,6 +1068,13 @@ export default function App() {
 
       setUiExplainStatus(`Local ${result.model} finished. GPU TDP: ${result.tdp_before_watts}W → ${result.tdp_active_watts}W → ${result.tdp_reset_watts}W.`);
       setUiExplainText(result.explanation || "Local LLM returned an empty explanation.");
+      appendLlmEntry({
+        source: context.kind === "preflight" ? "preflight" : context.kind === "remote" ? "remote" : "ui",
+        model: result.model,
+        title: context.title,
+        content: result.explanation || "Local LLM returned an empty explanation.",
+      });
+      setUiExplainOpen(false);
     } catch (err) {
       setUiExplainStatus(`Local LLM explanation failed: ${err}`);
       setUiExplainText("");
@@ -1390,7 +1469,6 @@ export default function App() {
         </button>
       </section>
 
-      {message ? <div className="message">{message}</div> : null}
 
 
       <section className="remote-actions-panel">
@@ -1627,7 +1705,7 @@ export default function App() {
         </div>
       </section>
 
-      {(uiExplainStatus || uiExplainText) ? (
+      {false ? (
         <section className="ui-explain-panel">
           <div className="ui-explain-panel__header">
             <div>
@@ -1665,7 +1743,65 @@ export default function App() {
         setConfirmAction={setConfirmAction}
         llmEngine={llmEngine}
         llmModel={llmModel}
+        appendLlmEntry={appendLlmEntry}
       />
+
+
+      <section className="chrono-log-dock">
+        <div className="chrono-log-pane">
+          <div className="chrono-log-pane__header">
+            <div>
+              <h2>System Log</h2>
+              <span>Deterministic ChronoGit events only.</span>
+            </div>
+            <button onClick={() => setSystemLog([])}>Clear</button>
+          </div>
+
+          <div className="chrono-log-pane__body">
+            {systemLog.length ? (
+              systemLog.map((entry) => (
+                <article className={`system-log-entry system-log-entry--${entry.level}`} key={entry.id}>
+                  <span>{entry.timestamp}</span>
+                  <strong>{entry.level}</strong>
+                  <p>{entry.message}</p>
+                  <button onClick={() => navigator.clipboard.writeText(entry.message)}>Copy</button>
+                </article>
+              ))
+            ) : (
+              <div className="chrono-log-empty">No system events in this session yet.</div>
+            )}
+          </div>
+        </div>
+
+        <div className="chrono-log-pane">
+          <div className="chrono-log-pane__header">
+            <div>
+              <h2>LLM Responses</h2>
+              <span>Advisory explanations only. Git remains authoritative.</span>
+            </div>
+            <button onClick={() => setLlmLog([])}>Clear</button>
+          </div>
+
+          <div className="chrono-log-pane__body chrono-log-pane__body--llm">
+            {llmLog.length ? (
+              llmLog.map((entry) => (
+                <article className="llm-log-entry" key={entry.id}>
+                  <div className="llm-log-entry__meta">
+                    <span>{entry.timestamp}</span>
+                    <strong>{entry.source}</strong>
+                    <code>{entry.model}</code>
+                  </div>
+                  <h3>{entry.title}</h3>
+                  <pre>{entry.content}</pre>
+                  <button onClick={() => navigator.clipboard.writeText(entry.content)}>Copy message</button>
+                </article>
+              ))
+            ) : (
+              <div className="chrono-log-empty">No LLM responses in this session yet.</div>
+            )}
+          </div>
+        </div>
+      </section>
 
       {confirmAction ? (
         <div className="confirm-overlay">
