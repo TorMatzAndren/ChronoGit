@@ -1,0 +1,117 @@
+.chronogit-shell {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  margin-bottom: 10px;
+  padding: 10px;
+  border: 1px solid rgba(100, 240, 200, 0.20);
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at top left, rgba(100, 240, 200, 0.10), transparent 24rem),
+    rgba(7, 16, 20, 0.96);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.36);
+  backdrop-filter: blur(10px);
+}
+
+.chronogit-shell__titlebar {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.7fr) minmax(0, 1.3fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.chronogit-shell__identity h1 {
+  margin: 0;
+  font-size: 24px;
+}
+
+.chronogit-shell__identity span,
+.chronogit-shell__eyebrow {
+  color: #8f9aae;
+  font-size: 11px;
+}
+
+.chronogit-shell__eyebrow {
+  color: #64f0c8;
+  text-transform: uppercase;
+  font-weight: 900;
+  letter-spacing: 0.10em;
+}
+
+.chronogit-shell__controls {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 7px;
+  align-items: end;
+}
+
+.chronogit-shell__repo {
+  flex: 1 1 420px;
+  display: grid;
+  gap: 3px;
+}
+
+.chronogit-shell__repo span {
+  color: #8f9aae;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.chronogit-shell__repo select {
+  width: 100%;
+  min-height: 28px;
+  color-scheme: dark;
+  background: #071014;
+  color: #dfffee;
+  border: 1px solid rgba(100, 240, 200, 0.34);
+  border-radius: 7px;
+  padding: 4px 8px;
+  font-size: 11px;
+}
+
+.chronogit-shell__beginner--on {
+  border-color: rgba(255, 214, 128, 0.44);
+  background: rgba(255, 214, 128, 0.12);
+  color: #fff0c2;
+}
+
+.chronogit-shell__truth {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.chronogit-shell__truth span {
+  display: grid;
+  gap: 2px;
+  padding: 6px 8px;
+  border-radius: 9px;
+  background: rgba(0, 0, 0, 0.24);
+  color: #d7dde7;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 10px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.chronogit-shell__truth strong {
+  color: #64f0c8;
+  font-family: Inter, system-ui, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  font-size: 9px;
+}
+
+@media (max-width: 1100px) {
+  .chronogit-shell__titlebar,
+  .chronogit-shell__truth {
+    grid-template-columns: 1fr;
+  }
+
+  .chronogit-shell__controls {
+    justify-content: flex-start;
+  }
+}
