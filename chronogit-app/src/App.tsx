@@ -1242,6 +1242,13 @@ export default function App() {
       setBusyPath(path);
       setMessage("");
       const result = await invoke<string>(action, { repoPath, path });
+
+      if (action === "git_remove_untracked") {
+        setExpandedPath((value) =>
+          value.startsWith(`${path}:`) ? "" : value
+        );
+      }
+
       setMessage(result);
       setLastAction(`${result}. Recovery depends on the action: committed history can be inspected in Time Machine; uncommitted discarded/untracked deletions may need manual re-editing or external backups.`);
       await refresh();
