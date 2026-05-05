@@ -779,8 +779,20 @@ export default function App() {
   const [uiExplainBusy, setUiExplainBusy] = useState(false);
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
   const [confirmText, setConfirmText] = useState("");
-  const [systemLog, setSystemLog] = useState<SystemLogEntry[]>([]);
-  const [llmLog, setLlmLog] = useState<LlmLogEntry[]>([]);
+  const [systemLog, setSystemLog] = useState<SystemLogEntry[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("chronogit_system_log") || "[]");
+    } catch {
+      return [];
+    }
+  });
+  const [llmLog, setLlmLog] = useState<LlmLogEntry[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("chronogit_llm_log") || "[]");
+    } catch {
+      return [];
+    }
+  });
   const [lastAction, setLastAction] = useState("No file-changing action performed in this session.");
   const [remotePreview, setRemotePreview] = useState<RemoteOperationPreview | null>(null);
   const [armedRemoteUploadKey, setArmedRemoteUploadKey] = useState("");
@@ -902,6 +914,15 @@ export default function App() {
       appendSystemLog(logLevelFromMessage(message), message);
     }
   }, [message]);
+
+
+  useEffect(() => {
+    localStorage.setItem("chronogit_system_log", JSON.stringify(systemLog));
+  }, [systemLog]);
+
+  useEffect(() => {
+    localStorage.setItem("chronogit_llm_log", JSON.stringify(llmLog));
+  }, [llmLog]);
 
   async function executeAction(action: "git_stage" | "git_unstage" | "git_restore" | "git_remove_untracked" | "git_ignore_path", path: string) {
     try {
@@ -1583,6 +1604,118 @@ export default function App() {
 
 
 
+      <section className="preflight-card">
+        <div>
+          <h2>Commit Preflight</h2>
+          <p>Jarri safety mode is active. ChronoGit reviews prepared files before any snapshot is created.</p>
+        </div>
+        <div className="preflight-card__actions">
+          <button
+            disabled={uiExplainBusy || !llmModel}
+            onClick={() => explainUiContext({
+              kind: "preflight",
+              title: "Explain Snapshot Preflight",
+              plainText: "Snapshot Preflight reviews only files prepared for the next commit. Files still in the working folder are not included in the commit.",
+              rawTruth: JSON.stringify({
+                staged_count: data.staged.length,
+                working_count: data.working.length,
+                staged: data.staged,
+                rule: "Only staged (prepared) files will be included in the commit. Working-folder files are excluded."
+              }, null, 2),
+            })}
+          >
+            Ask LLM
+          </button>
+          <button title={beginnerTitle("Review snapshot / Git commit\n\nOpens preflight before creating a commit. Only prepared files will be included.")} disabled={data.staged.length === 0} onClick={openSnapshotPreflight}>
+            Review snapshot / Git commit ({data.staged.length})
+          </button>
+          <ActionExplainButton
+            title="Explain Review snapshot / Git commit"
+            plainText="Review snapshot opens the commit preflight. Only prepared files will be included in the Git commit."
+            rawTruth={JSON.stringify({
+              staged_count: data.staged.length,
+              working_count: data.working.length,
+              rule: "Only staged/prepared files are included in the commit."
+            }, null, 2)}
+          />
+        </div>
+      </section>
+
+      <section className="summary-grid">
+        <div className="summary-card">
+          <div className="summary-card__number">{data.working.length}</div>
+          <div>working changes</div>
+        </div>
+        <div className="summary-card">
+          <div className="summary-card__number">{data.staged.length}</div>
+          <div>prepared changes</div>
+        </div>
+        <div className="summary-card">
+          <div className="summary-card__number">{totalChanges}</div>
+          <div>total visible changes</div>
+        </div>
+      </section>
+
+      <section className="columns">
+        <div className="panel">
+          <div className="panel__header">
+            <h2>Prepared for next commit</h2>
+            <p>These files are already staged. If you commit now, they become part of history.</p>
+          </div>
+          {data.staged.length ? renderGrouped(data.staged) : <div className="empty">Nothing prepared yet.</div>}
+        </div>
+
+        <div className="panel">
+          <div className="panel__header">
+            <h2>Working folder changes</h2>
+            <p>These changes exist on disk, but are not part of the next commit unless prepared.</p>
+          </div>
+          {data.working.length ? renderGrouped(data.working) : <div className="empty">Working folder is clean.</div>}
+        </div>
+      </section>
+
+      {false ? (
+        <section className="ui-explain-panel">
+          <div className="ui-explain-panel__header">
+            <div>
+              <div className="ui-explain-panel__eyebrow">Local LLM · UI explanation</div>
+              <h2>{uiExplainTitle || "ChronoGit explanation"}</h2>
+            </div>
+            <div className="ui-explain-panel__actions">
+              <button onClick={() => setUiExplainOpen((value) => !value)}>
+                {uiExplainOpen ? "Hide explanation" : "Read explanation"}
+              </button>
+              {uiExplainText ? (
+                <button
+                  onClick={async () => {
+                    await navigator.clipboard.writeText(uiExplainText);
+                    setUiExplainStatus("UI explanation copied to clipboard.");
+                  }}
+                >
+                  Copy result
+                </button>
+              ) : null}
+            </div>
+          </div>
+
+          {uiExplainStatus ? <div className="ui-explain-panel__status">{uiExplainStatus}</div> : null}
+          <div className="ui-explain-panel__warning">
+            Local LLM output is advisory. ChronoGit UI state and Git output remain authoritative.
+          </div>
+          {uiExplainText && uiExplainOpen ? <pre>{uiExplainText}</pre> : null}
+        </section>
+      ) : null}
+
+      <Timeline
+        repoPath={repoPath}
+        refreshTick={historyRefreshTick}
+        setConfirmAction={setConfirmAction}
+        llmEngine={llmEngine}
+        llmModel={llmModel}
+        appendLlmEntry={appendLlmEntry}
+      />
+
+
       <section className="remote-actions-panel">
         <div className="remote-actions-panel__header">
           <div>
@@ -1785,117 +1918,6 @@ export default function App() {
         ) : null}
       </section>
 
-      <section className="preflight-card">
-        <div>
-          <h2>Commit Preflight</h2>
-          <p>Jarri safety mode is active. ChronoGit reviews prepared files before any snapshot is created.</p>
-        </div>
-        <div className="preflight-card__actions">
-          <button
-            disabled={uiExplainBusy || !llmModel}
-            onClick={() => explainUiContext({
-              kind: "preflight",
-              title: "Explain Snapshot Preflight",
-              plainText: "Snapshot Preflight reviews only files prepared for the next commit. Files still in the working folder are not included in the commit.",
-              rawTruth: JSON.stringify({
-                staged_count: data.staged.length,
-                working_count: data.working.length,
-                staged: data.staged,
-                rule: "Only staged (prepared) files will be included in the commit. Working-folder files are excluded."
-              }, null, 2),
-            })}
-          >
-            Ask LLM
-          </button>
-          <button title={beginnerTitle("Review snapshot / Git commit\n\nOpens preflight before creating a commit. Only prepared files will be included.")} disabled={data.staged.length === 0} onClick={openSnapshotPreflight}>
-            Review snapshot / Git commit ({data.staged.length})
-          </button>
-          <ActionExplainButton
-            title="Explain Review snapshot / Git commit"
-            plainText="Review snapshot opens the commit preflight. Only prepared files will be included in the Git commit."
-            rawTruth={JSON.stringify({
-              staged_count: data.staged.length,
-              working_count: data.working.length,
-              rule: "Only staged/prepared files are included in the commit."
-            }, null, 2)}
-          />
-        </div>
-      </section>
-
-      <section className="summary-grid">
-        <div className="summary-card">
-          <div className="summary-card__number">{data.working.length}</div>
-          <div>working changes</div>
-        </div>
-        <div className="summary-card">
-          <div className="summary-card__number">{data.staged.length}</div>
-          <div>prepared changes</div>
-        </div>
-        <div className="summary-card">
-          <div className="summary-card__number">{totalChanges}</div>
-          <div>total visible changes</div>
-        </div>
-      </section>
-
-      <section className="columns">
-        <div className="panel">
-          <div className="panel__header">
-            <h2>Prepared for next commit</h2>
-            <p>These files are already staged. If you commit now, they become part of history.</p>
-          </div>
-          {data.staged.length ? renderGrouped(data.staged) : <div className="empty">Nothing prepared yet.</div>}
-        </div>
-
-        <div className="panel">
-          <div className="panel__header">
-            <h2>Working folder changes</h2>
-            <p>These changes exist on disk, but are not part of the next commit unless prepared.</p>
-          </div>
-          {data.working.length ? renderGrouped(data.working) : <div className="empty">Working folder is clean.</div>}
-        </div>
-      </section>
-
-      {false ? (
-        <section className="ui-explain-panel">
-          <div className="ui-explain-panel__header">
-            <div>
-              <div className="ui-explain-panel__eyebrow">Local LLM · UI explanation</div>
-              <h2>{uiExplainTitle || "ChronoGit explanation"}</h2>
-            </div>
-            <div className="ui-explain-panel__actions">
-              <button onClick={() => setUiExplainOpen((value) => !value)}>
-                {uiExplainOpen ? "Hide explanation" : "Read explanation"}
-              </button>
-              {uiExplainText ? (
-                <button
-                  onClick={async () => {
-                    await navigator.clipboard.writeText(uiExplainText);
-                    setUiExplainStatus("UI explanation copied to clipboard.");
-                  }}
-                >
-                  Copy result
-                </button>
-              ) : null}
-            </div>
-          </div>
-
-          {uiExplainStatus ? <div className="ui-explain-panel__status">{uiExplainStatus}</div> : null}
-          <div className="ui-explain-panel__warning">
-            Local LLM output is advisory. ChronoGit UI state and Git output remain authoritative.
-          </div>
-          {uiExplainText && uiExplainOpen ? <pre>{uiExplainText}</pre> : null}
-        </section>
-      ) : null}
-
-      <Timeline
-        repoPath={repoPath}
-        refreshTick={historyRefreshTick}
-        setConfirmAction={setConfirmAction}
-        llmEngine={llmEngine}
-        llmModel={llmModel}
-        appendLlmEntry={appendLlmEntry}
-      />
-
 
       <section className="chrono-log-dock">
         <div className="chrono-log-pane">
@@ -1904,12 +1926,12 @@ export default function App() {
               <h2>System Log</h2>
               <span>Deterministic ChronoGit events only.</span>
             </div>
-            <button onClick={() => setSystemLog([])}>Clear</button>
+            <button onClick={() => { setSystemLog([]); localStorage.removeItem("chronogit_system_log"); }}>Clear</button>
           </div>
 
           <div className="chrono-log-pane__body">
             {systemLog.length ? (
-              systemLog.map((entry) => (
+              [...systemLog].reverse().map((entry) => (
                 <article className={`system-log-entry system-log-entry--${entry.level}`} key={entry.id}>
                   <span>{entry.timestamp}</span>
                   <strong>{entry.level}</strong>
@@ -1929,12 +1951,12 @@ export default function App() {
               <h2>LLM Responses</h2>
               <span>Advisory explanations only. Git remains authoritative.</span>
             </div>
-            <button onClick={() => setLlmLog([])}>Clear</button>
+            <button onClick={() => { setLlmLog([]); localStorage.removeItem("chronogit_llm_log"); }}>Clear</button>
           </div>
 
           <div className="chrono-log-pane__body chrono-log-pane__body--llm">
             {llmLog.length ? (
-              llmLog.map((entry) => (
+              [...llmLog].reverse().map((entry) => (
                 <article className="llm-log-entry" key={entry.id}>
                   <div className="llm-log-entry__meta">
                     <span>{entry.timestamp}</span>
