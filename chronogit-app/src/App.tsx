@@ -805,6 +805,7 @@ export default function App() {
       return [];
     }
   });
+  const [systemLogFilter, setSystemLogFilter] = useState<"all" | "info" | "action" | "warning" | "error">("all");
   const [llmLog, setLlmLog] = useState<LlmLogEntry[]>(() => {
     try {
       return JSON.parse(localStorage.getItem("chronogit_llm_log") || "[]");
@@ -1497,6 +1498,9 @@ export default function App() {
   const hasCritical = data.staged.some((file) => file.risk === "critical");
   const selectedModel = localModels.find((model) => model.name === llmModel);
   const snapshotImpact = classifySnapshotImpact(commitPreflight);
+  const visibleSystemLog = systemLogFilter === "all"
+    ? systemLog
+    : systemLog.filter((entry) => entry.level === systemLogFilter);
 
   return (
     <main className="app-shell">
@@ -2073,17 +2077,29 @@ export default function App() {
 
       <section className="chrono-log-dock">
         <div className="chrono-log-pane">
-          <div className="chrono-log-pane__header">
+          <div className="chrono-log-pane__header chrono-log-pane__header--with-filters">
             <div>
               <h2>System Log</h2>
               <span>Deterministic ChronoGit events only.</span>
             </div>
-            <button onClick={() => { setSystemLog([]); localStorage.removeItem("chronogit_system_log"); }}>Clear</button>
+
+            <div className="system-log-filters">
+              {(["all", "action", "warning", "error", "info"] as const).map((filter) => (
+                <button
+                  key={filter}
+                  className={systemLogFilter === filter ? "system-log-filter system-log-filter--active" : "system-log-filter"}
+                  onClick={() => setSystemLogFilter(filter)}
+                >
+                  {filter}
+                </button>
+              ))}
+              <button onClick={() => { setSystemLog([]); localStorage.removeItem("chronogit_system_log"); }}>Clear</button>
+            </div>
           </div>
 
           <div className="chrono-log-pane__body">
-            {systemLog.length ? (
-              [...systemLog].reverse().map((entry) => (
+            {visibleSystemLog.length ? (
+              [...visibleSystemLog].reverse().map((entry) => (
                 <article className={`system-log-entry system-log-entry--${entry.level}`} key={entry.id}>
                   <div className="system-log-entry__time">
   <span className="system-log-entry__date">{entry.date}</span>
@@ -2092,8 +2108,14 @@ export default function App() {
                   <strong>{entry.level}</strong>
                   <p>{entry.message}</p>
                   <div className="system-log-entry__actions">
-  <button onClick={() => navigator.clipboard.writeText(entry.message)}>Copy</button>
   <button
+    title={beginnerMode ? "Copy this exact system log message to clipboard." : undefined}
+    onClick={() => navigator.clipboard.writeText(entry.message)}
+  >
+    Copy
+  </button>
+  <button
+    title={beginnerMode ? "Ask the local LLM to explain this exact system event. This does not change anything in your repository." : undefined}
     disabled={uiExplainBusy || !llmModel}
     onClick={() => explainUiContext({
       kind: "system_log",
@@ -2108,7 +2130,11 @@ export default function App() {
                 </article>
               ))
             ) : (
-              <div className="chrono-log-empty">No system events in this session yet.</div>
+              <div className="chrono-log-empty">
+                {systemLogFilter === "all"
+                  ? "No system events in this session yet."
+                  : `No ${systemLogFilter} system events in this session.`}
+              </div>
             )}
           </div>
         </div>

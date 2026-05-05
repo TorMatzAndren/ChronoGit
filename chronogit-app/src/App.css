@@ -2910,3 +2910,31 @@ p {
   padding: 2px 8px;
   font-size: 11px;
 }
+
+/* Low-profile System Log filters */
+.chrono-log-pane__header--with-filters {
+  align-items: center;
+}
+
+.system-log-filters {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+  align-items: center;
+}
+
+.system-log-filter {
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  padding: 3px 7px;
+  opacity: 0.72;
+}
+
+.system-log-filter--active {
+  opacity: 1;
+  color: #64f0c8;
+  border-color: rgba(100, 240, 200, 0.42);
+  background: rgba(100, 240, 200, 0.10);
+}
