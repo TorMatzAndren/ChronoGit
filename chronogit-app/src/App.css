@@ -2871,3 +2871,42 @@ p {
     grid-template-columns: 1fr;
   }
 }
+
+
+/* System log timestamp (2-line layout) */
+.system-log-entry__time {
+  display: flex;
+  flex-direction: column;
+  min-width: 90px;
+  font-family: monospace;
+}
+
+.system-log-entry__date {
+  font-size: 10px;
+  color: #8fa3b8;
+  opacity: 0.8;
+}
+
+.system-log-entry__clock {
+  font-size: 12px;
+  color: #cfd8e3;
+}
+
+
+/* Inline action buttons for system log */
+.system-log-entry {
+  display: grid;
+  grid-template-columns: auto auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.system-log-entry__actions {
+  display: flex;
+  gap: 6px;
+}
+
+.system-log-entry__actions button {
+  padding: 2px 8px;
+  font-size: 11px;
+}

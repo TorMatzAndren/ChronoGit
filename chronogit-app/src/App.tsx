@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import "./App.css";
 import jarriLogo from "./assets/jarri-logo.png";
@@ -483,7 +483,8 @@ type ConfirmAction = {
 
 type SystemLogEntry = {
   id: string;
-  timestamp: string;
+  date: string;
+  time: string;
   level: "info" | "warning" | "error" | "action";
   message: string;
 };
@@ -815,6 +816,8 @@ export default function App() {
   const [remotePreview, setRemotePreview] = useState<RemoteOperationPreview | null>(null);
   const [armedRemoteUploadKey, setArmedRemoteUploadKey] = useState("");
   const [remoteBusy, setRemoteBusy] = useState("");
+  const autoRefreshBusyRef = useRef(false);
+  const lastKnownStateSignatureRef = useRef("");
 
   function remotePreviewKey(preview: RemoteOperationPreview) {
     return [
@@ -832,6 +835,53 @@ export default function App() {
     return preview.operation === "upload_snapshots_preview" && armedRemoteUploadKey === remotePreviewKey(preview);
   }
 
+
+
+  function gitStateSignature(
+    status: GitStatusResponse,
+    remote: GitRemoteStatus | null,
+    operation: GitOperationState | null,
+  ) {
+    return JSON.stringify({
+      branch: status.branch,
+      staged: status.staged.map((file) => [
+        file.path,
+        file.index_status,
+        file.worktree_status,
+        file.status,
+        file.risk,
+        file.staged,
+      ]),
+      working: status.working.map((file) => [
+        file.path,
+        file.index_status,
+        file.worktree_status,
+        file.status,
+        file.risk,
+        file.staged,
+      ]),
+      remote: remote
+        ? {
+            branch: remote.branch,
+            upstream: remote.upstream,
+            ahead: remote.ahead,
+            behind: remote.behind,
+            has_remote: remote.has_remote,
+            is_diverged: remote.is_diverged,
+            is_clean: remote.is_clean,
+          }
+        : null,
+      operation: operation
+        ? {
+            rebase_in_progress: operation.rebase_in_progress,
+            merge_in_progress: operation.merge_in_progress,
+            cherry_pick_in_progress: operation.cherry_pick_in_progress,
+            revert_in_progress: operation.revert_in_progress,
+            conflicted_files: operation.conflicted_files,
+          }
+        : null,
+    });
+  }
 
   function appendSystemLog(level: SystemLogEntry["level"], messageText: string) {
     const trimmed = messageText.trim();
@@ -858,12 +908,25 @@ export default function App() {
 
       return [
         ...entries.slice(-119),
-        {
-          id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-          timestamp: new Date().toLocaleTimeString(),
-          level,
-          message: trimmed,
-        },
+        (() => {
+          const now = new Date();
+
+          const date = now.toLocaleDateString(undefined, {
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+          });
+
+          const time = now.toLocaleTimeString();
+
+          return {
+            id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+            date,
+            time,
+            level,
+            message: trimmed,
+          };
+        })(),
       ];
     });
   }
@@ -902,6 +965,7 @@ export default function App() {
     setData(statusResult);
     setRemoteStatus(remoteResult);
     setOperationState(operationResult);
+    lastKnownStateSignatureRef.current = gitStateSignature(statusResult, remoteResult, operationResult);
     setLastRefresh(new Date().toLocaleTimeString());
   }
 
@@ -961,6 +1025,48 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem("chronogit_llm_log", JSON.stringify(llmLog));
   }, [llmLog]);
+
+
+  useEffect(() => {
+    const timer = window.setInterval(async () => {
+      if (autoRefreshBusyRef.current) return;
+      if (busyPath || remoteBusy || confirmAction || showPreflight) return;
+
+      try {
+        autoRefreshBusyRef.current = true;
+
+        const [statusResult, remoteResult, operationResult] = await Promise.all([
+          invoke<GitStatusResponse>("git_status", { repoPath }),
+          invoke<GitRemoteStatus>("git_remote_status", { repoPath }),
+          invoke<GitOperationState>("git_operation_state", { repoPath }),
+        ]);
+
+        const nextSignature = gitStateSignature(statusResult, remoteResult, operationResult);
+
+        if (!lastKnownStateSignatureRef.current) {
+          lastKnownStateSignatureRef.current = nextSignature;
+          return;
+        }
+
+        if (nextSignature !== lastKnownStateSignatureRef.current) {
+          lastKnownStateSignatureRef.current = nextSignature;
+          setData(statusResult);
+          setRemoteStatus(remoteResult);
+          setOperationState(operationResult);
+          setLastRefresh(new Date().toLocaleTimeString());
+          setHistoryRefreshTick((value) => value + 1);
+          appendSystemLog("info", "Auto-refresh detected repository changes.");
+        }
+      } catch (err) {
+        appendSystemLog("warning", `Auto-refresh skipped: ${err}`);
+      } finally {
+        autoRefreshBusyRef.current = false;
+      }
+    }, 2500);
+
+    return () => window.clearInterval(timer);
+  }, [repoPath, busyPath, remoteBusy, confirmAction, showPreflight]);
+
 
   async function executeAction(action: "git_stage" | "git_unstage" | "git_restore" | "git_remove_untracked" | "git_ignore_path", path: string) {
     try {
@@ -1979,10 +2085,26 @@ export default function App() {
             {systemLog.length ? (
               [...systemLog].reverse().map((entry) => (
                 <article className={`system-log-entry system-log-entry--${entry.level}`} key={entry.id}>
-                  <span>{entry.timestamp}</span>
+                  <div className="system-log-entry__time">
+  <span className="system-log-entry__date">{entry.date}</span>
+  <span className="system-log-entry__clock">{entry.time}</span>
+</div>
                   <strong>{entry.level}</strong>
                   <p>{entry.message}</p>
-                  <button onClick={() => navigator.clipboard.writeText(entry.message)}>Copy</button>
+                  <div className="system-log-entry__actions">
+  <button onClick={() => navigator.clipboard.writeText(entry.message)}>Copy</button>
+  <button
+    disabled={uiExplainBusy || !llmModel}
+    onClick={() => explainUiContext({
+      kind: "system_log",
+      title: `Explain system log entry`,
+      plainText: entry.message,
+      rawTruth: JSON.stringify(entry, null, 2),
+    })}
+  >
+    Explain
+  </button>
+</div>
                 </article>
               ))
             ) : (
