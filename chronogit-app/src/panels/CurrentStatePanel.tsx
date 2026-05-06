@@ -1,59 +1,33 @@
-type RepoInfo = {
-  path: string;
-  name: string;
-  root: string;
-};
-
-type GitRemoteStatus = {
-  repo_path: string;
-  branch: string;
-  upstream: string | null;
-  remote: string | null;
-  remote_url: string | null;
-  ahead: number;
-  behind: number;
-  has_remote: boolean;
-  is_diverged: boolean;
-  is_clean: boolean;
-};
+import type { GitRemoteStatus } from "../core/chronogitRuntimeTypes";
 
 type Props = {
-  repos: RepoInfo[];
-  repoPath: string;
+  beginnerMode: boolean;
   branch: string;
-  remoteStatus: GitRemoteStatus | null;
+  remote: GitRemoteStatus | null;
   lastAction: string;
-  remoteStateLabel: (remote: GitRemoteStatus | null) => string;
-  explainRemoteHuman: (remote: GitRemoteStatus | null) => string;
+  message: string;
+  remoteLabel: (remote: GitRemoteStatus | null) => string;
+  remoteHuman: (remote: GitRemoteStatus | null) => string;
+  ui: (beginnerMode: boolean, beginner: string, pro: string) => string;
 };
 
 export function CurrentStatePanel({
-  repos,
-  repoPath,
+  beginnerMode,
   branch,
-  remoteStatus,
+  remote,
   lastAction,
-  remoteStateLabel,
-  explainRemoteHuman,
+  message,
+  remoteLabel,
+  remoteHuman,
+  ui,
 }: Props) {
   return (
-    <div className="current-state-card">
-      <div>
-        <div className="current-state-card__label">Current state</div>
-        <h2>{remoteStateLabel(remoteStatus)}</h2>
-        <p>{explainRemoteHuman(remoteStatus)}</p>
-      </div>
-
-      <div className="current-state-card__facts">
-        <span><strong>Repo</strong>{repos.find((repo) => repo.path === repoPath)?.name || "Selected repository"}</span>
-        <span><strong>Branch</strong>{remoteStatus?.branch || branch}</span>
-        <span><strong>Upstream</strong>{remoteStatus?.upstream || "none"}</span>
-      </div>
-
-      <div className="current-state-card__last">
-        <strong>Last action</strong>
-        <span>{lastAction}</span>
-      </div>
+    <div className="cg-panel-content">
+      <h3>{remoteLabel(remote)}</h3>
+      <p>{remoteHuman(remote)}</p>
+      <p><strong>{ui(beginnerMode, "Branch", "HEAD branch")}:</strong> {branch || "unknown"}</p>
+      <p><strong>{ui(beginnerMode, "Last action", "last mutation")}:</strong> {lastAction}</p>
+      <p><strong>{ui(beginnerMode, "Message", "last message")}:</strong> {message || "No message yet."}</p>
     </div>
   );
 }

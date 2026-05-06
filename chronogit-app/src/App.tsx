@@ -7,8 +7,10 @@ import { PANEL_REGISTRY } from "./panels/panelRegistry";
 import { LlmLogPanel } from "./panels/LlmLogPanel";
 import { SystemLogPanel } from "./panels/SystemLogPanel";
 import { NotesPanel } from "./panels/NotesPanel";
+import { CurrentStatePanel } from "./panels/CurrentStatePanel";
+import { RemoteStatusPanel } from "./panels/RemoteStatusPanel";
 import type { PanelInstance, PanelType, WorkspaceTab } from "./core/chronogitWorkspaceTypes";
-import type { LlmLogEntry, SystemLogEntry } from "./core/chronogitRuntimeTypes";
+import type { GitRemoteStatus, LlmLogEntry, SystemLogEntry } from "./core/chronogitRuntimeTypes";
 import { diffLineClass } from "./lib/diffUtils";
 
 type FileChange = {
@@ -31,19 +33,6 @@ type RepoInfo = {
   path: string;
   name: string;
   root: string;
-};
-
-type GitRemoteStatus = {
-  repo_path?: string;
-  branch: string;
-  upstream: string | null;
-  remote?: string | null;
-  remote_url: string | null;
-  ahead: number;
-  behind: number;
-  has_remote: boolean;
-  is_diverged: boolean;
-  is_clean?: boolean;
 };
 
 type GitOperationState = {
@@ -690,6 +679,8 @@ export default function App() {
   const [selectedPanelType, setSelectedPanelType] = useState<PanelType>("current-state");
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
   const [confirmText, setConfirmText] = useState("");
+  const [renameTabId, setRenameTabId] = useState("");
+  const [renameTabText, setRenameTabText] = useState("");
   const [busyPath, setBusyPath] = useState("");
   const [expandedPath, setExpandedPath] = useState("");
   const [commitMessage, setCommitMessage] = useState("");
@@ -965,11 +956,22 @@ ${context.rawTruth.slice(0, 12000)}`;
     }));
   }
 
-  function renameTab(tabId: string) {
+  function openRenameTab(tabId: string) {
     const current = state.tabs.find((tab) => tab.id === tabId);
-    const name = window.prompt("Rename tab:", current?.name || "Tab")?.trim();
-    if (!name) return;
-    setState((old) => ({ ...old, tabs: old.tabs.map((tab) => tab.id === tabId ? { ...tab, name } : tab) }));
+    setRenameTabId(tabId);
+    setRenameTabText(current?.name || "Tab");
+  }
+
+  function cancelRenameTab() {
+    setRenameTabId("");
+    setRenameTabText("");
+  }
+
+  function confirmRenameTab() {
+    const name = renameTabText.trim();
+    if (!renameTabId || !name) return;
+    setState((old) => ({ ...old, tabs: old.tabs.map((tab) => tab.id === renameTabId ? { ...tab, name } : tab) }));
+    cancelRenameTab();
   }
 
   function closeTab(tabId: string) {
@@ -1285,25 +1287,26 @@ ${context.rawTruth.slice(0, 12000)}`;
   function renderPanel(panel: PanelInstance) {
     if (panel.type === "current-state") {
       return (
-        <div className="cg-panel-content">
-          <h3>{remoteLabel(remote)}</h3>
-          <p>{remoteHuman(remote)}</p>
-          <p><strong>{ui(state.beginnerMode, "Branch", "HEAD branch")}:</strong> {data?.branch || "unknown"}</p>
-          <p><strong>{ui(state.beginnerMode, "Last action", "last mutation")}:</strong> {lastAction}</p>
-          <p><strong>{ui(state.beginnerMode, "Message", "last message")}:</strong> {message || "No message yet."}</p>
-        </div>
+        <CurrentStatePanel
+          beginnerMode={state.beginnerMode}
+          branch={data?.branch || "unknown"}
+          remote={remote}
+          lastAction={lastAction}
+          message={message}
+          remoteLabel={remoteLabel}
+          remoteHuman={remoteHuman}
+          ui={ui}
+        />
       );
     }
 
     if (panel.type === "remote-status") {
       return (
-        <div className="cg-panel-content">
-          <h3>{remoteLabel(remote)}</h3>
-          <p><strong>Branch:</strong> {remote?.branch || data?.branch || "unknown"}</p>
-          <p><strong>Upstream:</strong> {remote?.upstream || "none"}</p>
-          <p><strong>Ahead / behind:</strong> +{remote?.ahead ?? 0} / -{remote?.behind ?? 0}</p>
-          <code>{remote?.remote_url || "No remote URL detected"}</code>
-        </div>
+        <RemoteStatusPanel
+          branch={data?.branch || "unknown"}
+          remote={remote}
+          remoteLabel={remoteLabel}
+        />
       );
     }
 
@@ -1536,11 +1539,11 @@ ${context.rawTruth.slice(0, 12000)}`;
             key={tab.id}
             className={tab.id === activeTab.id ? "cg-tab cg-tab--active" : "cg-tab"}
             onClick={() => setState((current) => ({ ...current, activeTabId: tab.id }))}
-            onDoubleClick={() => renameTab(tab.id)}
+            onDoubleClick={() => openRenameTab(tab.id)}
             title={ui(state.beginnerMode, "Double-click to rename tab", "rename tab")}
           >
             {tab.name}
-            <span onClick={(event) => { event.stopPropagation(); renameTab(tab.id); }}>✎</span>
+            <span onClick={(event) => { event.stopPropagation(); openRenameTab(tab.id); }}>✎</span>
             <span onClick={(event) => { event.stopPropagation(); closeTab(tab.id); }}>×</span>
           </button>
         ))}
@@ -1572,6 +1575,32 @@ ${context.rawTruth.slice(0, 12000)}`;
           </section>
         ))}
       </section>
+
+      {renameTabId ? (
+        <div className="confirm-overlay">
+          <div className="confirm-modal">
+            <div className="confirm-modal__eyebrow">Workspace tab</div>
+            <h2>Rename tab</h2>
+            <label className="confirm-required-text">
+              <span>Choose a clear name for this ChronoGit workspace tab.</span>
+              <input
+                autoFocus
+                value={renameTabText}
+                onChange={(event) => setRenameTabText(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") confirmRenameTab();
+                  if (event.key === "Escape") cancelRenameTab();
+                }}
+                placeholder="Tab name"
+              />
+            </label>
+            <div className="confirm-modal__actions">
+              <button onClick={cancelRenameTab}>Cancel</button>
+              <button className="confirm" disabled={!renameTabText.trim()} onClick={confirmRenameTab}>Rename tab</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {confirmAction ? (
         <div className="confirm-overlay">
