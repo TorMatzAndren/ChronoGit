@@ -4,6 +4,44 @@ export type RepoInfo = {
   root: string;
 };
 
+export type HistoryCommit = {
+  hash: string;
+  short_hash: string;
+  author: string;
+  timestamp: string;
+  message: string;
+};
+
+export type ChangedFile = {
+  path: string;
+  status: string;
+};
+
+export type DiffResult = {
+  commit_hash: string;
+  path: string;
+  diff: string;
+};
+
+export type CommitComparison = {
+  left_commit: string;
+  right_commit: string;
+  left_label: string;
+  right_label: string;
+  changed_files: ChangedFile[];
+  insertions: number;
+  deletions: number;
+  diff: string;
+};
+
+export type ExplainDiffResult = {
+  model: string;
+  explanation: string;
+  tdp_before_watts: string;
+  tdp_active_watts: string;
+  tdp_reset_watts: string;
+};
+
 export type CommitResult = {
   ok: boolean;
   message: string;
