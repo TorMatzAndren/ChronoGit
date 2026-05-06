@@ -1510,3 +1510,976 @@ code {
   font-size: 11px;
   line-height: 1.45;
 }
+
+/* CHRONOGIT_TIME_MACHINE_LAYOUT_V1
+   Three independently scrolling panes: snapshots, changed files, diff/viewer. */
+
+.timeline-panel {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  gap: 10px;
+  padding: 10px;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.timeline-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(100, 240, 200, 0.16);
+}
+
+.timeline-header h2 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.timeline-header p {
+  margin: 4px 0 0;
+  color: #aab8c8;
+}
+
+.timeline-layout,
+.timeline-layout--three {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(260px, 0.9fr) minmax(320px, 1fr) minmax(440px, 1.9fr);
+  gap: 10px;
+  overflow: hidden;
+}
+
+.timeline-list,
+.timeline-files,
+.timeline-panel .diff-pretty,
+.timeline-panel pre {
+  min-height: 0;
+  overflow: auto;
+}
+
+.timeline-list,
+.timeline-files {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  padding-right: 4px;
+}
+
+.timeline-list button,
+.timeline-files button {
+  width: 100%;
+  min-height: 42px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px;
+  text-align: left;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.timeline-list button:hover,
+.timeline-files button:hover,
+.timeline-list button.timeline-selected,
+.timeline-files button.timeline-selected {
+  background: rgba(100, 240, 200, 0.13);
+  border-color: rgba(100, 240, 200, 0.58);
+}
+
+.timeline-hash {
+  color: #64f0c8;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: 900;
+}
+
+.timeline-message {
+  color: #dfffee;
+  font-weight: 800;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.timeline-meta {
+  grid-column: 2;
+  color: #8f9aae;
+  font-size: 11px;
+}
+
+.timeline-files code {
+  display: inline-block;
+  margin-right: 8px;
+  color: #ffd98a;
+  background: rgba(255, 210, 120, 0.09);
+}
+
+.timeline-panel .diff-pretty,
+.timeline-panel pre {
+  height: 100%;
+  padding: 12px;
+  border: 1px solid rgba(100, 240, 200, 0.14);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.26);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.diff-scope-card,
+.comparison-summary {
+  padding: 9px 10px;
+  border: 1px solid rgba(100, 240, 200, 0.18);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+@media (max-width: 1100px) {
+  .timeline-layout,
+  .timeline-layout--three {
+    grid-template-columns: 1fr;
+    grid-template-rows: 220px 220px 1fr;
+  }
+}
+
+
+/* CHRONOGIT_TIMEMACHINE_REPAIR_V1 */
+.timeline-panel {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  gap: 10px;
+  overflow: hidden;
+}
+
+.timeline-layout,
+.timeline-layout--three {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(240px, 0.9fr) minmax(280px, 1fr) minmax(420px, 1.9fr);
+  gap: 10px;
+  overflow: hidden;
+}
+
+.timeline-list,
+.timeline-files,
+.diff-viewer,
+.timeline-panel .diff-pretty {
+  min-height: 0;
+  overflow: auto;
+}
+
+.diff-viewer {
+  display: grid;
+  grid-template-rows: auto auto auto auto 1fr;
+  gap: 8px;
+}
+
+.timeline-commit--selected,
+.timeline-file--selected {
+  background: rgba(100, 240, 200, 0.14);
+  border-color: rgba(100, 240, 200, 0.62);
+}
+
+.diff-scope-card,
+.comparison-summary {
+  display: grid;
+  gap: 6px;
+  padding: 9px 10px;
+  border: 1px solid rgba(100, 240, 200, 0.18);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.diff-scope-card div,
+.comparison-summary div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.diff-scope-card strong,
+.comparison-summary strong {
+  color: #64f0c8;
+  font-size: 11px;
+}
+
+.diff-scope-card span,
+.comparison-summary span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: #c8d2e2;
+  font-size: 11px;
+}
+
+.comparison-summary {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+@media (max-width: 1100px) {
+  .timeline-layout,
+  .timeline-layout--three {
+    grid-template-columns: 1fr;
+    grid-template-rows: 220px 220px minmax(320px, 1fr);
+  }
+}
+
+/* CHRONOGIT_TIMEMACHINE_FOCUS_REPAIR_V2 */
+.timeline-panel {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  gap: 10px;
+  overflow: hidden;
+}
+
+.timeline-layout,
+.timeline-layout--three {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(240px, 0.9fr) minmax(280px, 1fr) minmax(420px, 1.9fr);
+  gap: 10px;
+  overflow: hidden;
+}
+
+.timeline-list,
+.timeline-files,
+.diff-viewer,
+.timeline-panel .diff-pretty {
+  min-height: 0;
+  overflow: auto;
+}
+
+.diff-viewer {
+  display: grid;
+  grid-template-rows: auto auto auto auto 1fr;
+  gap: 8px;
+}
+
+.timeline-commit--selected,
+.timeline-file--selected {
+  background: rgba(100, 240, 200, 0.14);
+  border-color: rgba(100, 240, 200, 0.62);
+}
+
+.diff-scope-card,
+.comparison-summary {
+  display: grid;
+  gap: 6px;
+  padding: 9px 10px;
+  border: 1px solid rgba(100, 240, 200, 0.18);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.diff-scope-card div,
+.comparison-summary div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.diff-scope-card strong,
+.comparison-summary strong {
+  color: #64f0c8;
+  font-size: 11px;
+}
+
+.diff-scope-card span,
+.comparison-summary span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: #c8d2e2;
+  font-size: 11px;
+}
+
+.comparison-summary {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+@media (max-width: 1100px) {
+  .timeline-layout,
+  .timeline-layout--three {
+    grid-template-columns: 1fr;
+    grid-template-rows: 220px 220px minmax(320px, 1fr);
+  }
+}
+
+/* CHRONOGIT_TIMEMACHINE_FOCUS_REPAIR_V3 */
+.timeline-panel {
+  height: calc(100% - 30px);
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 10px;
+  padding: 12px;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.timeline-layout,
+.timeline-layout--three {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(240px, 0.9fr) minmax(280px, 1fr) minmax(420px, 1.9fr);
+  gap: 10px;
+  overflow: hidden;
+}
+
+.timeline-list,
+.timeline-files,
+.diff-viewer,
+.timeline-panel .diff-pretty {
+  min-height: 0;
+  overflow: auto;
+}
+
+.diff-viewer {
+  display: grid;
+  grid-template-rows: auto auto auto auto minmax(0, 1fr);
+  gap: 8px;
+}
+
+.focus-surface {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px 12px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid rgba(100, 240, 200, 0.18);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.focus-surface em {
+  grid-column: 1 / -1;
+  color: #8f9aae;
+  font-size: 11px;
+  font-style: normal;
+}
+
+.timeline-commit--selected,
+.timeline-file--selected {
+  background: rgba(100, 240, 200, 0.14) !important;
+  border-color: rgba(100, 240, 200, 0.62) !important;
+}
+
+.diff-scope-card,
+.comparison-summary {
+  display: grid;
+  gap: 6px;
+  padding: 9px 10px;
+  border: 1px solid rgba(100, 240, 200, 0.18);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.diff-scope-card div,
+.comparison-summary div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.diff-scope-card strong,
+.comparison-summary strong {
+  color: #64f0c8;
+  font-size: 11px;
+}
+
+.diff-scope-card span,
+.comparison-summary span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: #c8d2e2;
+  font-size: 11px;
+}
+
+.comparison-summary {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+@media (max-width: 1100px) {
+  .timeline-layout,
+  .timeline-layout--three {
+    grid-template-columns: 1fr;
+    grid-template-rows: 220px 220px minmax(320px, 1fr);
+  }
+}
+
+/* CHRONOGIT_DIFF_COLOR_AND_HUNK_SELECTION_REPAIR_V1 */
+.timeline-panel .diff-pretty {
+  min-height: 0;
+  height: 100%;
+  overflow: auto;
+  padding: 10px 0;
+  border: 1px solid rgba(100, 240, 200, 0.16);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.34);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.timeline-panel .diff-line {
+  display: grid;
+  grid-template-columns: 52px 1fr;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  padding: 1px 10px;
+  border: 0;
+  border-radius: 0;
+  text-align: left;
+  color: #d7e4ee;
+  background: transparent;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.timeline-panel .diff-line:hover {
+  background: rgba(100, 240, 200, 0.08);
+}
+
+.timeline-panel .diff-line--selected {
+  outline: 1px solid rgba(255, 216, 122, 0.85);
+  background: rgba(255, 216, 122, 0.20) !important;
+}
+
+.timeline-panel .diff-line__number {
+  color: #7f8da0;
+  text-align: right;
+  user-select: none;
+}
+
+.timeline-panel .diff-line__text {
+  min-width: 0;
+}
+
+.timeline-panel .diff-line--header {
+  color: #82bdff;
+  background: rgba(80, 150, 255, 0.10);
+  font-weight: 800;
+}
+
+.timeline-panel .diff-line--file {
+  color: #a9c8ff;
+  background: rgba(80, 150, 255, 0.07);
+}
+
+.timeline-panel .diff-line--hunk {
+  color: #ffd87a;
+  background: rgba(255, 216, 122, 0.16);
+  font-weight: 900;
+}
+
+.timeline-panel .diff-line--add {
+  color: #b8ffd9;
+  background: rgba(70, 220, 140, 0.12);
+}
+
+.timeline-panel .diff-line--remove {
+  color: #ffb8b8;
+  background: rgba(255, 80, 80, 0.13);
+}
+
+.timeline-panel .diff-actions {
+  flex-wrap: wrap;
+}
+
+/* CHRONOGIT_TIMEMACHINE_FILELIST_TIGHTEN_V1 */
+.timeline-files {
+  gap: 4px;
+  padding-right: 6px;
+}
+
+.timeline-file {
+  min-height: 28px !important;
+  grid-template-columns: 24px 1fr !important;
+  gap: 7px !important;
+  padding: 4px 8px !important;
+}
+
+.timeline-file span {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 900;
+  color: #061412;
+}
+
+.timeline-file strong {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 11px;
+}
+
+.timeline-file span:first-child {
+  background: #ffd87a;
+}
+
+.timeline-file span:first-child:has(+ strong) {
+  color: #061412;
+}
+
+.timeline-file:has(span:first-child:nth-child(1)) {
+  border-color: rgba(100, 240, 200, 0.24);
+}
+
+.timeline-file span:first-child {
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.35) inset;
+}
+
+/* Status-specific colouring by text content is not reliable in CSS alone,
+   so keep the badge warm and the selected/hover states strong. */
+.timeline-file--selected {
+  background: rgba(100, 240, 200, 0.18) !important;
+  border-color: rgba(100, 240, 200, 0.78) !important;
+}
+
+/* CHRONOGIT_TIMEMACHINE_DIFF_ACTION_TIGHTEN_V1 */
+.diff-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0 4px;
+}
+
+.diff-actions button {
+  min-height: 24px;
+  padding: 3px 9px;
+  font-size: 11px;
+}
+
+.diff-title {
+  color: #67b7ff;
+  font-size: 15px;
+  font-weight: 900;
+}
+
+.diff-scope-card {
+  grid-template-columns: 1fr 1fr 1.2fr;
+}
+
+@media (max-width: 1100px) {
+  .diff-scope-card {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* CHRONOGIT_TIMEMACHINE_DIFF_ACTIONS_V3 */
+.timeline-files {
+  gap: 4px;
+}
+
+.timeline-file {
+  min-height: 30px !important;
+  padding: 5px 8px !important;
+  grid-template-columns: 26px 1fr !important;
+}
+
+.timeline-file span {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 900;
+  color: #ffd98a;
+  background: rgba(255, 217, 138, 0.12);
+  border: 1px solid rgba(255, 217, 138, 0.28);
+}
+
+.timeline-file strong {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.timeline-file:has(span:first-child:is(:contains("A"))) {
+  border-color: rgba(100, 240, 200, 0.32);
+}
+
+.diff-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  align-items: center;
+}
+
+.diff-actions button {
+  min-height: 27px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.diff-actions button:disabled {
+  opacity: 0.42;
+}
+
+.diff-title {
+  color: #61b7ff;
+  font-size: 15px;
+  font-weight: 900;
+}
+
+/* CHRONOGIT_TIMEMACHINE_DIFF_ACTIONS_V4 */
+.timeline-files {
+  gap: 4px;
+}
+
+.timeline-file {
+  min-height: 30px !important;
+  padding: 5px 8px !important;
+  grid-template-columns: 26px 1fr !important;
+}
+
+.timeline-file span {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 900;
+  color: #ffd98a;
+  background: rgba(255, 217, 138, 0.12);
+  border: 1px solid rgba(255, 217, 138, 0.28);
+}
+
+.timeline-file strong {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.diff-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  align-items: center;
+}
+
+.diff-actions button {
+  min-height: 27px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.diff-actions button:disabled {
+  opacity: 0.42;
+}
+
+.diff-title {
+  color: #61b7ff;
+  font-size: 15px;
+  font-weight: 900;
+}
+
+/* CHRONOGIT_CHANGE_CARD_RISK_COLOURS_V1 */
+.change-card--normal,
+.change-card--safe {
+  border-left: 4px solid #64f0c8 !important;
+}
+
+.change-card--review,
+.change-card--evidence {
+  border-left: 4px solid #5fb9ff !important;
+}
+
+.change-card--danger {
+  border-left: 4px solid #ffb84d !important;
+}
+
+.change-card--critical {
+  border-left: 4px solid #ff6666 !important;
+}
+
+.change-card--normal .change-risk,
+.change-card--safe .change-risk {
+  color: #64f0c8 !important;
+}
+
+.change-card--review .change-risk,
+.change-card--evidence .change-risk {
+  color: #5fb9ff !important;
+}
+
+.change-card--danger .change-risk {
+  color: #ffb84d !important;
+}
+
+.change-card--critical .change-risk {
+  color: #ff6666 !important;
+}
+
+/* CHRONOGIT_CHANGE_CARD_THEME_STRIPE_OVERRIDE_V1 */
+.change-card {
+  border-left: none !important;
+}
+
+.change-card--normal,
+.change-card--safe {
+  box-shadow: inset 4px 0 0 #64f0c8;
+}
+
+.change-card--review,
+.change-card--evidence {
+  box-shadow: inset 4px 0 0 #5fb9ff;
+}
+
+.change-card--danger {
+  box-shadow: inset 4px 0 0 #ffb84d;
+}
+
+.change-card--critical {
+  box-shadow: inset 4px 0 0 #ff6666;
+}
+
+/* CHRONOGIT_CHANGE_CARD_LEFT_EDGE_FIX_V2 */
+.change-card {
+  border-left: 1px solid rgba(90, 220, 255, 0.10) !important;
+}
+
+.change-card--normal,
+.change-card--safe {
+  border-left: 1px solid rgba(100, 240, 200, 0.18) !important;
+  box-shadow:
+    inset 4px 0 0 #64f0c8,
+    inset 5px 0 0 rgba(255,255,255,0.04);
+}
+
+.change-card--review,
+.change-card--evidence {
+  border-left: 1px solid rgba(95, 185, 255, 0.18) !important;
+  box-shadow:
+    inset 4px 0 0 #5fb9ff,
+    inset 5px 0 0 rgba(255,255,255,0.04);
+}
+
+.change-card--danger {
+  border-left: 1px solid rgba(255, 184, 77, 0.18) !important;
+  box-shadow:
+    inset 4px 0 0 #ffb84d,
+    inset 5px 0 0 rgba(255,255,255,0.04);
+}
+
+.change-card--critical {
+  border-left: 1px solid rgba(255, 102, 102, 0.18) !important;
+  box-shadow:
+    inset 4px 0 0 #ff6666,
+    inset 5px 0 0 rgba(255,255,255,0.04);
+}
+
+/* CHRONOGIT_CHANGE_CARD_BLUE_STRIP_KILL_V3 */
+.change-card--normal,
+.change-card--safe {
+  border-left-color: transparent !important;
+  background-image:
+    linear-gradient(to right, #64f0c8 0px, #64f0c8 4px, transparent 4px);
+  box-shadow: none !important;
+}
+
+.change-card--review,
+.change-card--evidence {
+  border-left-color: transparent !important;
+  background-image:
+    linear-gradient(to right, #5fb9ff 0px, #5fb9ff 4px, transparent 4px);
+  box-shadow: none !important;
+}
+
+.change-card--danger {
+  border-left-color: transparent !important;
+  background-image:
+    linear-gradient(to right, #ffb84d 0px, #ffb84d 4px, transparent 4px);
+  box-shadow: none !important;
+}
+
+.change-card--critical {
+  border-left-color: transparent !important;
+  background-image:
+    linear-gradient(to right, #ff6666 0px, #ff6666 4px, transparent 4px);
+  box-shadow: none !important;
+}
+
+/* CHRONOGIT_SAFE_CARD_FULL_GREEN_EDGE_V4 */
+.change-card--normal,
+.change-card--safe {
+  border-left: 4px solid #64f0c8 !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+.change-card--normal::before,
+.change-card--safe::before {
+  content: none !important;
+}
+
+.change-card--normal * ,
+.change-card--safe * {
+  border-left-color: transparent !important;
+}
+
+/* CHRONOGIT_SAFE_CARD_RESTORE_OUTLINE_V5 */
+.change-card--normal,
+.change-card--safe {
+  border-top: 1px solid rgba(100, 240, 200, 0.35) !important;
+  border-right: 1px solid rgba(100, 240, 200, 0.35) !important;
+  border-bottom: 1px solid rgba(100, 240, 200, 0.35) !important;
+  border-left: 4px solid #64f0c8 !important;
+}
+
+/* CHRONOGIT_SAFE_CARD_FULL_GREEN_FRAME_V6 */
+.change-card--normal,
+.change-card--safe {
+  border-color: rgba(100, 240, 200, 0.55) !important;
+  border-left-width: 4px !important;
+}
+
+/* CHRONOGIT_SAFE_CARD_RIGHT_EDGE_FIX_V7 */
+.change-card--normal,
+.change-card--safe {
+  position: relative;
+}
+
+.change-card--normal::after,
+.change-card--safe::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 1px;
+  height: 100%;
+  background: rgba(100, 240, 200, 0.55);
+  pointer-events: none;
+}
+
+/* CHRONOGIT_SAFE_CARD_THICK_EDGE_REBUILD_V8 */
+.change-card--normal,
+.change-card--safe {
+  border-right: none !important;
+  border-left: none !important;
+  position: relative;
+}
+
+.change-card--normal::before,
+.change-card--safe::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 4px;
+  height: 100%;
+  background: #64f0c8;
+  border-radius: 3px 0 0 3px;
+  pointer-events: none;
+}
+
+.change-card--normal::after,
+.change-card--safe::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: 3px;
+  height: 100%;
+  background: rgba(100, 240, 200, 0.72);
+  border-radius: 0 3px 3px 0;
+  pointer-events: none;
+}
+
+/* CHRONOGIT_CHANGE_CARD_EDGE_UNIFY_V9 */
+.change-card {
+  position: relative !important;
+  overflow: hidden !important;
+  border: 1px solid rgba(100, 240, 200, 0.20) !important;
+  border-radius: 10px !important;
+  box-shadow: none !important;
+  background-image: none !important;
+}
+
+.change-card::before,
+.change-card::after {
+  content: "" !important;
+  position: absolute !important;
+  top: 0 !important;
+  bottom: 0 !important;
+  width: 5px !important;
+  pointer-events: none !important;
+}
+
+.change-card::before { left: 0 !important; }
+.change-card::after { right: 0 !important; }
+
+.change-card--normal,
+.change-card--safe {
+  border-color: rgba(100, 240, 200, 0.48) !important;
+}
+
+.change-card--normal::before,
+.change-card--normal::after,
+.change-card--safe::before,
+.change-card--safe::after {
+  background: #64f0c8 !important;
+}
+
+.change-card--review::before,
+.change-card--review::after {
+  background: #5fb9ff !important;
+}
+
+.change-card--evidence::before,
+.change-card--evidence::after,
+.change-card--danger::before,
+.change-card--danger::after {
+  background: #ffb84d !important;
+}
+
+.change-card--critical::before,
+.change-card--critical::after {
+  background: #ff6666 !important;
+}
+
+/* CHRONOGIT_DIFF_CLICK_SELECTION_FIX_V2 */
+.timeline-panel .diff-pretty {
+  user-select: none;
+}
+
+.timeline-panel .diff-line {
+  cursor: pointer !important;
+  pointer-events: auto !important;
+}
+
+.timeline-panel .diff-line__number,
+.timeline-panel .diff-line__num,
+.timeline-panel .diff-line__text {
+  pointer-events: none !important;
+}
+
+.timeline-panel .diff-line--selected {
+  outline: 1px solid rgba(255, 216, 122, 0.95) !important;
+  background: rgba(255, 216, 122, 0.22) !important;
+}
+
+.timeline-panel .diff-line--selected .diff-line__number,
+.timeline-panel .diff-line--selected .diff-line__num {
+  color: #ffd87a !important;
+  font-weight: 900 !important;
+}
