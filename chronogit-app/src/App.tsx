@@ -6,6 +6,7 @@ import jarriLogo from "./assets/jarri-logo.png";
 import { PANEL_REGISTRY } from "./panels/panelRegistry";
 import { LlmLogPanel } from "./panels/LlmLogPanel";
 import { SystemLogPanel } from "./panels/SystemLogPanel";
+import { NotesPanel } from "./panels/NotesPanel";
 import type { PanelInstance, PanelType, WorkspaceTab } from "./core/chronogitWorkspaceTypes";
 import type { LlmLogEntry, SystemLogEntry } from "./core/chronogitRuntimeTypes";
 import { diffLineClass } from "./lib/diffUtils";
@@ -1483,6 +1484,7 @@ ${context.rawTruth.slice(0, 12000)}`;
           beginnerMode={state.beginnerMode}
           llmLog={llmLog}
           toggleLlmEntry={toggleLlmEntry}
+          clearLlmLog={() => setLlmLog([])}
           ui={ui}
         />
       );
@@ -1492,7 +1494,7 @@ ${context.rawTruth.slice(0, 12000)}`;
       return <div className="cg-panel-content"><p>This truth now lives in the title bar.</p></div>;
     }
 
-    if (panel.type === "notes") return <div className="cg-panel-content"><textarea className="cg-notes" placeholder="Operator notes..." /></div>;
+    if (panel.type === "notes") return <NotesPanel setConfirmAction={setConfirmAction} />;
     return <div className="cg-panel-content"><p>Empty panel.</p></div>;
   }
 

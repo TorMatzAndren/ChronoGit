@@ -4,6 +4,16 @@ export type RepoInfo = {
   root: string;
 };
 
+export type ConfirmAction = {
+  title: string;
+  body: string;
+  confirmLabel: string;
+  danger: boolean;
+  action: () => Promise<void>;
+  requiredText?: string;
+  requiredTextLabel?: string;
+};
+
 export type SystemLogEntry = {
   id: string;
   date: string;

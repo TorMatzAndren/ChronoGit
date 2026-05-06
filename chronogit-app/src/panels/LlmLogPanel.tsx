@@ -4,6 +4,7 @@ type Props = {
   beginnerMode: boolean;
   llmLog: LlmLogEntry[];
   toggleLlmEntry: (id: string) => void;
+  clearLlmLog: () => void;
   ui: (beginnerMode: boolean, beginner: string, pro: string) => string;
 };
 
@@ -11,10 +12,17 @@ export function LlmLogPanel({
   beginnerMode,
   llmLog,
   toggleLlmEntry,
+  clearLlmLog,
   ui,
 }: Props) {
   return (
     <div className="cg-panel-content cg-llm-log-panel">
+      <div className="cg-action-row">
+        <button disabled={!llmLog.length} onClick={clearLlmLog}>
+          {ui(beginnerMode, "Clear LLM log", "clear llm log")}
+        </button>
+      </div>
+
       {llmLog.length ? llmLog.map((entry) => (
         <article className={`llm-log-entry ${entry.streaming ? "llm-log-entry--streaming" : ""}`} key={entry.id}>
           <button className="llm-log-entry__header" onClick={() => toggleLlmEntry(entry.id)}>

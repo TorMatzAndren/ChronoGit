@@ -2483,3 +2483,74 @@ code {
   color: #ffd87a !important;
   font-weight: 900 !important;
 }
+
+/* CHRONOGIT_NOTES_PANEL_V1 */
+.cg-notes-panel {
+  height: calc(100% - 54px);
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.cg-notes-panel__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.cg-notes-panel__body {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(180px, 0.38fr) minmax(260px, 1fr);
+  gap: 10px;
+  overflow: hidden;
+}
+
+.cg-notes-panel__list {
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  padding-right: 4px;
+}
+
+.cg-notes-panel__item {
+  width: 100%;
+  display: grid;
+  gap: 3px;
+  text-align: left;
+  padding: 8px 9px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.cg-notes-panel__item--active {
+  background: rgba(100, 240, 200, 0.14);
+  border-color: rgba(100, 240, 200, 0.58);
+}
+
+.cg-notes-panel__item strong {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.cg-notes-panel__item span {
+  color: #8f9aae;
+  font-size: 10px;
+}
+
+.cg-notes {
+  height: 100%;
+  min-height: 0;
+  resize: none;
+  overflow: auto;
+}
+
+@media (max-width: 900px) {
+  .cg-notes-panel__body {
+    grid-template-columns: 1fr;
+    grid-template-rows: 160px minmax(240px, 1fr);
+  }
+}
