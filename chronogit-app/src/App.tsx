@@ -4,6 +4,8 @@ import { listen } from "@tauri-apps/api/event";
 import "./App.css";
 import jarriLogo from "./assets/jarri-logo.png";
 import { PANEL_REGISTRY } from "./panels/panelRegistry";
+import { RepoDropdown } from "./components/RepoDropdown";
+import { PanelDropdown } from "./components/PanelDropdown";
 import { LlmLogPanel } from "./panels/LlmLogPanel";
 import { SystemLogPanel } from "./panels/SystemLogPanel";
 import { NotesPanel } from "./panels/NotesPanel";
@@ -18,11 +20,16 @@ import type { PanelInstance, PanelType, WorkspaceTab } from "./core/chronogitWor
 import type {
   CommitPreflight,
   CommitResult,
+  ConfirmAction,
   ExplainContext,
+  ExplainDiffResult,
   FileChange,
   GitRemoteStatus,
   LlmLogEntry,
   LocalModel,
+  RemoteOperationPreview,
+  RemotePullResult,
+  RemotePushResult,
   SystemLogEntry,
 } from "./core/chronogitRuntimeTypes";
 
@@ -45,72 +52,6 @@ type GitOperationState = {
   revert_in_progress: boolean;
   conflicted_files: string[];
   warning: string;
-};
-
-type ChangedFile = {
-  path: string;
-  status: string;
-};
-
-type RemotePullResult = {
-  ok: boolean;
-  message: string;
-  stdout: string;
-  stderr: string;
-};
-
-type RemotePushResult = {
-  ok: boolean;
-  message: string;
-  stdout: string;
-  stderr: string;
-};
-
-type MergeSafetyPrediction = {
-  classification: string;
-  risk_level: string;
-  summary: string;
-  local_touched_files: number;
-  remote_touched_files: number;
-  local_files: string[];
-  remote_files: string[];
-  shared_files: string[];
-  working_changes: number;
-  warning: string;
-};
-
-type RemoteOperationPreview = {
-  operation: string;
-  repo_path: string;
-  branch: string;
-  upstream: string | null;
-  remote: string | null;
-  ahead: number;
-  behind: number;
-  commit_count: number;
-  commits: string[];
-  changed_files: ChangedFile[];
-  consequence: string;
-  warning: string;
-  merge_safety: MergeSafetyPrediction;
-};
-
-type ExplainDiffResult = {
-  model: string;
-  explanation: string;
-  tdp_before_watts: string;
-  tdp_active_watts: string;
-  tdp_reset_watts: string;
-};
-
-type ConfirmAction = {
-  title: string;
-  body: string;
-  confirmLabel: string;
-  danger: boolean;
-  action: () => Promise<void>;
-  requiredText?: string;
-  requiredTextLabel?: string;
 };
 
 type LlmStreamEvent = {
@@ -296,128 +237,6 @@ function snapshotRemoteSentence(remote: GitRemoteStatus | null) {
 
 function guardedRemoteToken(preview: RemoteOperationPreview) {
   return preview.merge_safety.risk_level === "HIGH" ? "override" : "confirm";
-}
-
-function RepoDropdown({
-  value,
-  repos,
-  onChange,
-  beginnerMode,
-}: {
-  value: string;
-  repos: RepoInfo[];
-  onChange: (repoPath: string) => void;
-  beginnerMode: boolean;
-}) {
-  const rootRef = useRef<HTMLDivElement | null>(null);
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const selectedRepo = repos.find((repo) => repo.path === value);
-  const filteredRepos = repos.filter((repo) => {
-    const needle = query.trim().toLowerCase();
-    if (!needle) return true;
-    return `${repo.name} ${repo.path}`.toLowerCase().includes(needle);
-  });
-
-  useEffect(() => {
-    function onPointerDown(event: PointerEvent) {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
-    }
-    window.addEventListener("pointerdown", onPointerDown);
-    return () => window.removeEventListener("pointerdown", onPointerDown);
-  }, []);
-
-  return (
-    <div className="cg-repo-dropdown" ref={rootRef}>
-      <button
-        type="button"
-        className="cg-repo-dropdown__button"
-        onClick={() => setOpen((current) => !current)}
-        title={beginnerMode ? "Select which local Git repository ChronoGit should inspect." : "repo selector"}
-      >
-        <span>
-          <strong>{selectedRepo?.name || "Selected repository"}</strong>
-          <em>{value}</em>
-        </span>
-        <b>{open ? "▲" : "▼"}</b>
-      </button>
-
-      {open ? (
-        <div className="cg-repo-dropdown__menu">
-          <input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search repositories..." />
-          <div className="cg-repo-dropdown__list">
-            {filteredRepos.length ? filteredRepos.map((repo) => (
-              <button
-                type="button"
-                key={repo.path}
-                className={repo.path === value ? "cg-repo-dropdown__item cg-repo-dropdown__item--active cg-repo-dropdown__item--selected" : "cg-repo-dropdown__item"}
-                onClick={() => {
-                  onChange(repo.path);
-                  setQuery("");
-                  setOpen(false);
-                }}
-              >
-                <strong>{repo.name}</strong>
-                <span>{repo.path}</span>
-              </button>
-            )) : <div className="cg-repo-dropdown__empty">No repositories match this search.</div>}
-          </div>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function PanelDropdown({
-  value,
-  onChange,
-  beginnerMode,
-}: {
-  value: PanelType;
-  onChange: (type: PanelType) => void;
-  beginnerMode: boolean;
-}) {
-  const rootRef = useRef<HTMLDivElement | null>(null);
-  const [open, setOpen] = useState(false);
-  const selected = PANEL_REGISTRY.find((panel) => panel.type === value) || PANEL_REGISTRY[0];
-
-  useEffect(() => {
-    function onPointerDown(event: PointerEvent) {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
-    }
-    window.addEventListener("pointerdown", onPointerDown);
-    return () => window.removeEventListener("pointerdown", onPointerDown);
-  }, []);
-
-  return (
-    <div className="cg-panel-dropdown" ref={rootRef}>
-      <button type="button" className="cg-panel-dropdown__button" onClick={() => setOpen((current) => !current)}>
-        <span>{selected.title}</span>
-        <b>{open ? "▲" : "▼"}</b>
-      </button>
-      {open ? (
-        <div className="cg-panel-dropdown__menu">
-          <div className="cg-panel-dropdown__list">
-            {PANEL_REGISTRY.map((panel) => (
-              <button
-                type="button"
-                key={panel.type}
-                className={panel.type === value ? "cg-panel-dropdown__item cg-panel-dropdown__item--active" : "cg-panel-dropdown__item"}
-                title={beginnerMode ? panel.description : panel.type}
-                onClick={() => {
-                  onChange(panel.type);
-                  setOpen(false);
-                }}
-              >
-                <strong>{panel.title}</strong>
-                <span>{beginnerMode ? panel.description : panel.type}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      ) : null}
-    </div>
-  );
 }
 
 export default function App() {
