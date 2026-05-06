@@ -4,6 +4,30 @@ export type RepoInfo = {
   root: string;
 };
 
+export type FileChange = {
+  path: string;
+  index_status?: string;
+  worktree_status?: string;
+  status: string;
+  risk: string;
+  staged: boolean;
+  explanation: string;
+};
+
+export type CommitPreflight = {
+  staged_files: number;
+  insertions: number;
+  deletions: number;
+  is_empty: boolean;
+};
+
+export type ExplainContext = {
+  kind: string;
+  title: string;
+  plainText: string;
+  rawTruth: string;
+};
+
 export type HistoryCommit = {
   hash: string;
   short_hash: string;

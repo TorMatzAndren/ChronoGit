@@ -8,21 +8,21 @@ import { LlmLogPanel } from "./panels/LlmLogPanel";
 import { SystemLogPanel } from "./panels/SystemLogPanel";
 import { NotesPanel } from "./panels/NotesPanel";
 import { CurrentStatePanel } from "./panels/CurrentStatePanel";
+import { CommitPreflightPanel } from "./panels/CommitPreflightPanel";
 import { RemoteStatusPanel } from "./panels/RemoteStatusPanel";
 import { LocalLlmPanel } from "./panels/LocalLlmPanel";
 import { TimeMachinePanel } from "./panels/TimeMachinePanel";
 import type { PanelInstance, PanelType, WorkspaceTab } from "./core/chronogitWorkspaceTypes";
-import type { CommitResult, GitRemoteStatus, LlmLogEntry, LocalModel, SystemLogEntry } from "./core/chronogitRuntimeTypes";
-
-type FileChange = {
-  path: string;
-  index_status?: string;
-  worktree_status?: string;
-  status: string;
-  risk: string;
-  staged: boolean;
-  explanation: string;
-};
+import type {
+  CommitPreflight,
+  CommitResult,
+  ExplainContext,
+  FileChange,
+  GitRemoteStatus,
+  LlmLogEntry,
+  LocalModel,
+  SystemLogEntry,
+} from "./core/chronogitRuntimeTypes";
 
 type GitStatusResponse = {
   branch: string;
@@ -43,13 +43,6 @@ type GitOperationState = {
   revert_in_progress: boolean;
   conflicted_files: string[];
   warning: string;
-};
-
-type CommitPreflight = {
-  staged_files: number;
-  insertions: number;
-  deletions: number;
-  is_empty: boolean;
 };
 
 type ChangedFile = {
@@ -106,13 +99,6 @@ type ExplainDiffResult = {
   tdp_before_watts: string;
   tdp_active_watts: string;
   tdp_reset_watts: string;
-};
-
-type ExplainContext = {
-  kind: string;
-  title: string;
-  plainText: string;
-  rawTruth: string;
 };
 
 type ConfirmAction = {
@@ -1167,73 +1153,19 @@ ${context.rawTruth.slice(0, 12000)}`;
     }
 
     if (panel.type === "commit-preflight") {
-      const stagedCount = data?.staged.length ?? 0;
-      const workingCount = data?.working.length ?? 0;
-      const totalCount = stagedCount + workingCount;
-      const riskyPrepared = data?.staged.filter((file) => ["critical", "danger", "evidence"].includes(file.risk)) || [];
-
       return (
-        <div className="cg-panel-content cg-preflight-panel">
-          <section className="cg-surface-card cg-surface-card--hero">
-            <div>
-              <div className="cg-eyebrow">{ui(state.beginnerMode, "Commit boundary", "index boundary")}</div>
-              <h3>{ui(state.beginnerMode, "Next snapshot contains", "git diff --cached --stat")}</h3>
-              <p>
-                {ui(
-                  state.beginnerMode,
-                  "Only prepared files are included. Working-folder changes stay outside this snapshot.",
-                  "Only index/staged paths are committed. Worktree paths are excluded.",
-                )}
-              </p>
-            </div>
-
-            <div className="cg-action-row">
-              <button disabled={uiExplainBusy || !llmModel} onClick={() => explainUiContext({
-                kind: "preflight",
-                title: "Explain Snapshot Preflight",
-                plainText: "Snapshot Preflight reviews only files prepared for the next commit.",
-                rawTruth: JSON.stringify({ staged: data?.staged || [], working: data?.working || [] }, null, 2),
-              })}>
-                {ui(state.beginnerMode, "Ask LLM", "explain_context")}
-              </button>
-              <button className="confirm" disabled={!stagedCount} onClick={openSnapshotPreflight}>
-                {ui(state.beginnerMode, `Review snapshot / Git commit (${stagedCount})`, "git commit")}
-              </button>
-            </div>
-          </section>
-
-          <section className="cg-metric-grid">
-            <div className="cg-metric-card">
-              <strong>{stagedCount}</strong>
-              <span>{ui(state.beginnerMode, "prepared files", "staged files")}</span>
-            </div>
-            <div className="cg-metric-card">
-              <strong>{workingCount}</strong>
-              <span>{ui(state.beginnerMode, "excluded working changes", "worktree excluded")}</span>
-            </div>
-            <div className="cg-metric-card">
-              <strong>{riskyPrepared.length}</strong>
-              <span>{ui(state.beginnerMode, "prepared warnings", "risk flags")}</span>
-            </div>
-            <div className="cg-metric-card">
-              <strong>{totalCount}</strong>
-              <span>{ui(state.beginnerMode, "visible changes", "status entries")}</span>
-            </div>
-          </section>
-
-          <section className={riskyPrepared.length ? "cg-status-callout cg-status-callout--warning" : "cg-status-callout cg-status-callout--ok"}>
-            <strong>
-              {riskyPrepared.length
-                ? ui(state.beginnerMode, "Review prepared warnings before committing", "risk flags in index")
-                : ui(state.beginnerMode, "No dangerous prepared files detected", "index risk clean")}
-            </strong>
-            <span>
-              {riskyPrepared.length
-                ? riskyPrepared.map((file) => `${file.risk}: ${file.path}`).join(" · ")
-                : snapshotRemoteSentence(remote)}
-            </span>
-          </section>
-        </div>
+        <CommitPreflightPanel
+          beginnerMode={state.beginnerMode}
+          staged={data?.staged || []}
+          working={data?.working || []}
+          remote={remote}
+          llmModel={llmModel}
+          uiExplainBusy={uiExplainBusy}
+          explainUiContext={explainUiContext}
+          openSnapshotPreflight={openSnapshotPreflight}
+          snapshotRemoteSentence={snapshotRemoteSentence}
+          ui={ui}
+        />
       );
     }
 

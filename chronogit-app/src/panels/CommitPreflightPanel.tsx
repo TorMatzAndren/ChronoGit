@@ -1,73 +1,100 @@
-import type { ReactNode } from "react";
-
-type FileChange = {
-  path: string;
-  index_status: string;
-  worktree_status: string;
-  status: string;
-  risk: string;
-  staged: boolean;
-  explanation: string;
-};
-
-type ExplainContext = {
-  kind: string;
-  title: string;
-  plainText: string;
-  rawTruth: string;
-};
+import type {
+  ExplainContext,
+  FileChange,
+  GitRemoteStatus,
+} from "../core/chronogitRuntimeTypes";
 
 type Props = {
+  beginnerMode: boolean;
   staged: FileChange[];
   working: FileChange[];
-  disabled: boolean;
-  explainUiContext: (context: ExplainContext) => void;
-  openSnapshotPreflight: () => void;
-  beginnerTitle: (text: string) => string | undefined;
-  actionHelp: ReactNode;
+  remote: GitRemoteStatus | null;
+  llmModel: string;
+  uiExplainBusy: boolean;
+  explainUiContext: (context: ExplainContext) => Promise<void>;
+  openSnapshotPreflight: () => Promise<void>;
+  snapshotRemoteSentence: (remote: GitRemoteStatus | null) => string;
+  ui: (beginnerMode: boolean, beginner: string, pro: string) => string;
 };
 
 export function CommitPreflightPanel({
+  beginnerMode,
   staged,
   working,
-  disabled,
+  remote,
+  llmModel,
+  uiExplainBusy,
   explainUiContext,
   openSnapshotPreflight,
-  beginnerTitle,
-  actionHelp,
+  snapshotRemoteSentence,
+  ui,
 }: Props) {
+  const stagedCount = staged.length;
+  const workingCount = working.length;
+  const totalCount = stagedCount + workingCount;
+  const riskyPrepared = staged.filter((file) => ["critical", "danger", "evidence"].includes(file.risk));
+
   return (
-    <section className="preflight-card">
-      <div>
-        <h2>Commit Preflight</h2>
-        <p>Jarri safety mode is active. ChronoGit reviews prepared files before any snapshot is created.</p>
-      </div>
-      <div className="preflight-card__actions">
-        <button
-          disabled={disabled}
-          onClick={() => explainUiContext({
+    <div className="cg-panel-content cg-preflight-panel">
+      <section className="cg-surface-card cg-surface-card--hero">
+        <div>
+          <div className="cg-eyebrow">{ui(beginnerMode, "Commit boundary", "index boundary")}</div>
+          <h3>{ui(beginnerMode, "Next snapshot contains", "git diff --cached --stat")}</h3>
+          <p>
+            {ui(
+              beginnerMode,
+              "Only prepared files are included. Working-folder changes stay outside this snapshot.",
+              "Only index/staged paths are committed. Worktree paths are excluded.",
+            )}
+          </p>
+        </div>
+
+        <div className="cg-action-row">
+          <button disabled={uiExplainBusy || !llmModel} onClick={() => explainUiContext({
             kind: "preflight",
             title: "Explain Snapshot Preflight",
-            plainText: "Snapshot Preflight reviews only files prepared for the next commit. Files still in the working folder are not included in the commit.",
-            rawTruth: JSON.stringify({
-              staged_count: staged.length,
-              working_count: working.length,
-              staged,
-              rule: "Only staged (prepared) files will be included in the commit. Working-folder files are excluded."
-            }, null, 2),
-          })}
-        >
-          Ask LLM
-        </button>
-        <button
-          title={beginnerTitle("Review snapshot / Git commit\n\nOpens preflight before creating a commit. Only prepared files will be included.")}
-          disabled={staged.length === 0}
-          onClick={openSnapshotPreflight}
-        >
-          Review snapshot / Git commit ({staged.length})
-        </button>
-        {actionHelp}
-      </div>
-    </section>
+            plainText: "Snapshot Preflight reviews only files prepared for the next commit.",
+            rawTruth: JSON.stringify({ staged, working }, null, 2),
+          })}>
+            {ui(beginnerMode, "Ask LLM", "explain_context")}
+          </button>
+          <button className="confirm" disabled={!stagedCount} onClick={openSnapshotPreflight}>
+            {ui(beginnerMode, `Review snapshot / Git commit (${stagedCount})`, "git commit")}
+          </button>
+        </div>
+      </section>
+
+      <section className="cg-metric-grid">
+        <div className="cg-metric-card">
+          <strong>{stagedCount}</strong>
+          <span>{ui(beginnerMode, "prepared files", "staged files")}</span>
+        </div>
+        <div className="cg-metric-card">
+          <strong>{workingCount}</strong>
+          <span>{ui(beginnerMode, "excluded working changes", "worktree excluded")}</span>
+        </div>
+        <div className="cg-metric-card">
+          <strong>{riskyPrepared.length}</strong>
+          <span>{ui(beginnerMode, "prepared warnings", "risk flags")}</span>
+        </div>
+        <div className="cg-metric-card">
+          <strong>{totalCount}</strong>
+          <span>{ui(beginnerMode, "visible changes", "status entries")}</span>
+        </div>
+      </section>
+
+      <section className={riskyPrepared.length ? "cg-status-callout cg-status-callout--warning" : "cg-status-callout cg-status-callout--ok"}>
+        <strong>
+          {riskyPrepared.length
+            ? ui(beginnerMode, "Review prepared warnings before committing", "risk flags in index")
+            : ui(beginnerMode, "No dangerous prepared files detected", "index risk clean")}
+        </strong>
+        <span>
+          {riskyPrepared.length
+            ? riskyPrepared.map((file) => `${file.risk}: ${file.path}`).join(" · ")
+            : snapshotRemoteSentence(remote)}
+        </span>
+      </section>
+    </div>
   );
 }
