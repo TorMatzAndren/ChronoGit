@@ -95,6 +95,49 @@ export type GitRemoteStatus = {
   is_clean?: boolean;
 };
 
+export type RemotePullResult = {
+  ok: boolean;
+  message: string;
+  stdout: string;
+  stderr: string;
+};
+
+export type RemotePushResult = {
+  ok: boolean;
+  message: string;
+  stdout: string;
+  stderr: string;
+};
+
+export type MergeSafetyPrediction = {
+  classification: string;
+  risk_level: string;
+  summary: string;
+  local_touched_files: number;
+  remote_touched_files: number;
+  local_files: string[];
+  remote_files: string[];
+  shared_files: string[];
+  working_changes: number;
+  warning: string;
+};
+
+export type RemoteOperationPreview = {
+  operation: string;
+  repo_path: string;
+  branch: string;
+  upstream: string | null;
+  remote: string | null;
+  ahead: number;
+  behind: number;
+  commit_count: number;
+  commits: string[];
+  changed_files: ChangedFile[];
+  consequence: string;
+  warning: string;
+  merge_safety: MergeSafetyPrediction;
+};
+
 export type ConfirmAction = {
   title: string;
   body: string;
