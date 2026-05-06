@@ -1267,6 +1267,74 @@ fn git_commit(repo_path: String, message: String) -> Result<CommitResult, String
 }
 
 #[tauri::command]
+fn git_amend_latest_commit_message(repo_path: String, message: String) -> Result<CommitResult, String> {
+    let trimmed = message.trim();
+
+    if trimmed.is_empty() {
+        return Err("Rename blocked: snapshot message is required.".into());
+    }
+
+    let status_out = Command::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .args(["status", "--porcelain=v1"])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !status_out.status.success() {
+        return Err(command_error("git status --porcelain=v1", &status_out));
+    }
+
+    if !String::from_utf8_lossy(&status_out.stdout).trim().is_empty() {
+        return Err("Rename blocked: working tree is not clean. Commit or restore changes before amending the latest snapshot message.".into());
+    }
+
+    let old_hash_out = Command::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .args(["rev-parse", "--short", "HEAD"])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !old_hash_out.status.success() {
+        return Err(command_error("git rev-parse --short HEAD", &old_hash_out));
+    }
+
+    let old_hash = String::from_utf8_lossy(&old_hash_out.stdout).trim().to_string();
+
+    let amend_out = Command::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .args(["commit", "--amend", "-m"])
+        .arg(trimmed)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !amend_out.status.success() {
+        return Err(command_error("git commit --amend -m", &amend_out));
+    }
+
+    let new_hash_out = Command::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .args(["rev-parse", "--short", "HEAD"])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    let new_hash = if new_hash_out.status.success() {
+        String::from_utf8_lossy(&new_hash_out.stdout).trim().to_string()
+    } else {
+        "unknown".to_string()
+    };
+
+    Ok(CommitResult {
+        ok: true,
+        message: format!("Renamed latest snapshot message. Git commit hash changed: {} → {}", old_hash, new_hash),
+        commit_hash: new_hash,
+    })
+}
+
+#[tauri::command]
 fn git_history(repo_path: String) -> Result<Vec<HistoryCommit>, String> {
     let out = Command::new("git")
         .arg("-C")
@@ -2469,6 +2537,7 @@ pub fn run() {
             git_remove_untracked,
             git_ignore_path,
             git_commit,
+            git_amend_latest_commit_message,
             git_history,
             git_changed_files_from_commit,
             git_diff_file_from_commit,

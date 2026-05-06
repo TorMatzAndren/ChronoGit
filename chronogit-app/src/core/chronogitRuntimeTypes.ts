@@ -4,6 +4,12 @@ export type RepoInfo = {
   root: string;
 };
 
+export type CommitResult = {
+  ok: boolean;
+  message: string;
+  commit_hash: string;
+};
+
 export type LocalModel = {
   name: string;
   engine: string;

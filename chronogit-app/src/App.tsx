@@ -11,7 +11,7 @@ import { CurrentStatePanel } from "./panels/CurrentStatePanel";
 import { RemoteStatusPanel } from "./panels/RemoteStatusPanel";
 import { LocalLlmPanel } from "./panels/LocalLlmPanel";
 import type { PanelInstance, PanelType, WorkspaceTab } from "./core/chronogitWorkspaceTypes";
-import type { GitRemoteStatus, LlmLogEntry, LocalModel, SystemLogEntry } from "./core/chronogitRuntimeTypes";
+import type { CommitResult, GitRemoteStatus, LlmLogEntry, LocalModel, SystemLogEntry } from "./core/chronogitRuntimeTypes";
 import { diffLineClass } from "./lib/diffUtils";
 
 type FileChange = {
@@ -43,12 +43,6 @@ type GitOperationState = {
   revert_in_progress: boolean;
   conflicted_files: string[];
   warning: string;
-};
-
-type CommitResult = {
-  ok: boolean;
-  message: string;
-  commit_hash: string;
 };
 
 type CommitPreflight = {
@@ -1699,6 +1693,8 @@ function TimeMachinePanel({
   const [compareBase, setCompareBase] = useState<HistoryCommit | null>(null);
   const [comparison, setComparison] = useState<CommitComparison | null>(null);
   const [selectedDiffLines, setSelectedDiffLines] = useState<Set<number>>(new Set());
+  const [renameSnapshotOpen, setRenameSnapshotOpen] = useState(false);
+  const [renameSnapshotText, setRenameSnapshotText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -1860,6 +1856,58 @@ function TimeMachinePanel({
     }
   }
 
+  function openRenameLatestSnapshot() {
+    if (!selected || !history.length || selected.hash !== history[0].hash) return;
+    setRenameSnapshotText(selected.message);
+    setRenameSnapshotOpen(true);
+  }
+
+  function cancelRenameLatestSnapshot() {
+    setRenameSnapshotOpen(false);
+    setRenameSnapshotText("");
+  }
+
+  async function requestRenameLatestSnapshot() {
+    if (!selected || !history.length || selected.hash !== history[0].hash) return;
+
+    const currentMessage = selected.message;
+    const nextMessage = renameSnapshotText.trim();
+
+    if (!nextMessage || nextMessage === currentMessage) {
+      cancelRenameLatestSnapshot();
+      return;
+    }
+
+    cancelRenameLatestSnapshot();
+
+    setConfirmAction({
+      title: "Rename latest snapshot message",
+      body: [
+        "This amends the latest Git commit message.",
+        "",
+        "Git truth:",
+        "- This rewrites the latest commit object.",
+        "- The commit hash will change.",
+        "- This is safest before pushing.",
+        "",
+        `Current message: ${currentMessage}`,
+        `New message: ${nextMessage}`,
+      ].join("\n"),
+      confirmLabel: ui(beginnerMode, "Rename latest snapshot", "git commit --amend"),
+      danger: true,
+      action: async () => {
+        const result = await invoke<CommitResult>("git_amend_latest_commit_message", {
+          repoPath,
+          message: nextMessage,
+        });
+
+        setError("");
+        setDiff(`${result.message}\n\nRefresh history to inspect the new snapshot hash.`);
+        await loadHistory();
+      },
+    });
+  }
+
 async function restoreSelectedFile() {
     if (!selected || !selectedFile) return;
     const snapshot = selected;
@@ -1889,8 +1937,54 @@ async function restoreSelectedFile() {
           <button disabled={!selected} onClick={() => setCompareBase(selected)}>Set A</button>
           <button disabled={!compareBase || !selected || compareBase.hash === selected.hash} onClick={compareToSelected}>Compare A → B</button>
           <button disabled={!compareBase && !comparison} onClick={() => { setCompareBase(null); setComparison(null); }}>Clear A/B</button>
+          <button
+            className="danger-button"
+            disabled={!selected || !history.length || selected.hash !== history[0].hash}
+            onClick={openRenameLatestSnapshot}
+            title={ui(beginnerMode, "Only the latest local snapshot can be renamed safely here.", "git commit --amend only applies to HEAD")}
+          >
+            {ui(beginnerMode, "Rename latest snapshot", "amend HEAD message")}
+          </button>
         </div>
       </div>
+      {renameSnapshotOpen ? (
+        <div className="confirm-overlay">
+          <div className="confirm-modal confirm-modal--danger">
+            <div className="confirm-modal__eyebrow">History rewrite</div>
+            <h2>Rename latest snapshot</h2>
+            <pre>{[
+              "This prepares a rename of the latest Git commit message.",
+              "",
+              "ChronoGit will ask for final confirmation before running git commit --amend.",
+              "Only the latest snapshot can be renamed here.",
+            ].join("\n")}</pre>
+            <label className="confirm-required-text">
+              <span>New snapshot message</span>
+              <input
+                autoFocus
+                value={renameSnapshotText}
+                onChange={(event) => setRenameSnapshotText(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") void requestRenameLatestSnapshot();
+                  if (event.key === "Escape") cancelRenameLatestSnapshot();
+                }}
+                placeholder="Snapshot message"
+              />
+            </label>
+            <div className="confirm-modal__actions">
+              <button onClick={cancelRenameLatestSnapshot}>Cancel</button>
+              <button
+                className="danger-button"
+                disabled={!renameSnapshotText.trim() || renameSnapshotText.trim() === selected?.message}
+                onClick={() => void requestRenameLatestSnapshot()}
+              >
+                Continue to safety confirmation
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <div className="timeline-layout timeline-layout--three">
         <div className="timeline-list">{history.map((commit) => <button key={commit.hash} className={selected?.hash === commit.hash ? "timeline-commit timeline-commit--selected" : "timeline-commit"} onClick={() => selectSnapshot(commit)}><span className="timeline-hash">{commit.short_hash}</span><span className="timeline-message">{commit.message}</span><span className="timeline-meta">{commit.author} · {commit.timestamp}</span></button>)}</div>
         <div className="timeline-files"><div className="diff-title">{selected ? `Changed files in ${selected.short_hash}` : "Changed files"}</div>{changedFiles.length ? changedFiles.map((file) => <button key={`${file.status}-${file.path}`} className={selectedFile?.path === file.path ? "timeline-file timeline-file--selected" : "timeline-file"} onClick={() => selectFile(file)}><span>{file.status}</span><strong>{file.path}</strong></button>) : <div className="timeline-empty">Select a snapshot first.</div>}</div>
