@@ -4,6 +4,28 @@ export type RepoInfo = {
   root: string;
 };
 
+export type GitStatusResponse = {
+  branch: string;
+  staged: FileChange[];
+  working: FileChange[];
+};
+
+export type GitOperationState = {
+  rebase_in_progress: boolean;
+  merge_in_progress: boolean;
+  cherry_pick_in_progress: boolean;
+  revert_in_progress: boolean;
+  conflicted_files: string[];
+  warning: string;
+};
+
+export type LlmStreamEvent = {
+  stream_id: string;
+  chunk: string;
+  done: boolean;
+  error: string | null;
+};
+
 export type FileChange = {
   path: string;
   index_status?: string;

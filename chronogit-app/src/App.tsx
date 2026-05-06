@@ -6,6 +6,7 @@ import jarriLogo from "./assets/jarri-logo.png";
 import { PANEL_REGISTRY } from "./panels/panelRegistry";
 import { RepoDropdown } from "./components/RepoDropdown";
 import { PanelDropdown } from "./components/PanelDropdown";
+import { SnapshotPreflightModal } from "./components/SnapshotPreflightModal";
 import { LlmLogPanel } from "./panels/LlmLogPanel";
 import { SystemLogPanel } from "./panels/SystemLogPanel";
 import { NotesPanel } from "./panels/NotesPanel";
@@ -23,43 +24,18 @@ import type {
   ConfirmAction,
   ExplainContext,
   ExplainDiffResult,
-  FileChange,
+  GitOperationState,
   GitRemoteStatus,
+  GitStatusResponse,
   LlmLogEntry,
+  LlmStreamEvent,
   LocalModel,
   RemoteOperationPreview,
   RemotePullResult,
   RemotePushResult,
+  RepoInfo,
   SystemLogEntry,
 } from "./core/chronogitRuntimeTypes";
-
-type GitStatusResponse = {
-  branch: string;
-  staged: FileChange[];
-  working: FileChange[];
-};
-
-type RepoInfo = {
-  path: string;
-  name: string;
-  root: string;
-};
-
-type GitOperationState = {
-  rebase_in_progress: boolean;
-  merge_in_progress: boolean;
-  cherry_pick_in_progress: boolean;
-  revert_in_progress: boolean;
-  conflicted_files: string[];
-  warning: string;
-};
-
-type LlmStreamEvent = {
-  stream_id: string;
-  chunk: string;
-  done: boolean;
-  error: string | null;
-};
 
 type AppState = {
   activeTabId: string;
@@ -1060,32 +1036,21 @@ ${context.rawTruth.slice(0, 12000)}`;
       ) : null}
 
       {showPreflight ? (
-        <div className="preflight-overlay">
-          <div className="preflight-modal">
-            <h2>{ui(state.beginnerMode, "Snapshot Preflight", "git commit preflight")}</h2>
-            <p>{ui(state.beginnerMode, "Only prepared files will be included.", "Only index/staged files are committed.")}</p>
-            <div className="snapshot-boundary-box">
-              <h3>{ui(state.beginnerMode, "Next snapshot contains", "git diff --cached --stat")}</h3>
-              <div className="snapshot-boundary-grid">
-                <div><strong>{commitPreflight?.staged_files ?? data?.staged.length ?? 0}</strong><span>files</span></div>
-                <div><strong>+{commitPreflight?.insertions ?? 0}</strong><span>insertions</span></div>
-                <div><strong>-{commitPreflight?.deletions ?? 0}</strong><span>deletions</span></div>
-              </div>
-              <p>{snapshotRemoteSentence(remote)}</p>
-              {snapshotImpact ? <div className="snapshot-impact-warning"><strong>{snapshotImpact.label}</strong><span>{snapshotImpact.text}</span></div> : null}
-            </div>
-            <h3>Included files ({data?.staged.length ?? 0})</h3>
-            <div className="preflight-list">{data?.staged.map((file) => <div key={file.path} className="preflight-item">✔ {file.path}</div>)}</div>
-            {preflightWarnings.length ? (
-              <div className="preflight-warnings">{preflightWarnings.map((file) => <div key={file.path} className="warning-item">⚠ {file.path} — {file.risk}</div>)}</div>
-            ) : <p>No dangerous prepared files detected.</p>}
-            <input className="preflight-input" value={commitMessage} onChange={(event) => setCommitMessage(event.target.value)} placeholder={ui(state.beginnerMode, "Describe this snapshot...", "commit message")} />
-            <div className="preflight-actions">
-              <button onClick={() => setShowPreflight(false)}>Cancel</button>
-              <button className="confirm" disabled={!commitMessage.trim() || hasCritical} onClick={confirmSnapshot}>{ui(state.beginnerMode, "Create snapshot", "git commit")}</button>
-            </div>
-          </div>
-        </div>
+        <SnapshotPreflightModal
+          beginnerMode={state.beginnerMode}
+          commitPreflight={commitPreflight}
+          staged={data?.staged || []}
+          preflightWarnings={preflightWarnings}
+          hasCritical={hasCritical}
+          snapshotImpact={snapshotImpact}
+          remote={remote}
+          commitMessage={commitMessage}
+          setCommitMessage={setCommitMessage}
+          onCancel={() => setShowPreflight(false)}
+          onConfirm={confirmSnapshot}
+          snapshotRemoteSentence={snapshotRemoteSentence}
+          ui={ui}
+        />
       ) : null}
     </main>
   );
