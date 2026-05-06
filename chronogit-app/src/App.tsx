@@ -9,8 +9,9 @@ import { SystemLogPanel } from "./panels/SystemLogPanel";
 import { NotesPanel } from "./panels/NotesPanel";
 import { CurrentStatePanel } from "./panels/CurrentStatePanel";
 import { RemoteStatusPanel } from "./panels/RemoteStatusPanel";
+import { LocalLlmPanel } from "./panels/LocalLlmPanel";
 import type { PanelInstance, PanelType, WorkspaceTab } from "./core/chronogitWorkspaceTypes";
-import type { GitRemoteStatus, LlmLogEntry, SystemLogEntry } from "./core/chronogitRuntimeTypes";
+import type { GitRemoteStatus, LlmLogEntry, LocalModel, SystemLogEntry } from "./core/chronogitRuntimeTypes";
 import { diffLineClass } from "./lib/diffUtils";
 
 type FileChange = {
@@ -142,16 +143,6 @@ type ExplainContext = {
   title: string;
   plainText: string;
   rawTruth: string;
-};
-
-type LocalModel = {
-  name: string;
-  engine: string;
-  size: number;
-  modified_at?: string;
-  family: string;
-  parameter_size: string;
-  quantization_level: string;
 };
 
 type ConfirmAction = {
@@ -579,89 +570,6 @@ function PanelDropdown({
     </div>
   );
 }
-
-function ChronoDropdown({
-  value,
-  options,
-  onChange,
-  label,
-  placeholder = "Search...",
-  className = "",
-}: {
-  value: string;
-  options: { value: string; title: string; subtitle?: string }[];
-  onChange: (value: string) => void;
-  label: string;
-  placeholder?: string;
-  className?: string;
-}) {
-  const rootRef = useRef<HTMLDivElement | null>(null);
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
-
-  const selected = options.find((option) => option.value === value);
-  const filtered = options.filter((option) => {
-    const needle = query.trim().toLowerCase();
-    if (!needle) return true;
-    return `${option.title} ${option.subtitle || ""} ${option.value}`.toLowerCase().includes(needle);
-  });
-
-  useEffect(() => {
-    function onPointerDown(event: PointerEvent) {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
-    }
-
-    window.addEventListener("pointerdown", onPointerDown);
-    return () => window.removeEventListener("pointerdown", onPointerDown);
-  }, []);
-
-  return (
-    <div className={`cg-unified-dropdown ${className}`} ref={rootRef}>
-      <button type="button" className="cg-unified-dropdown__button" onClick={() => setOpen((current) => !current)}>
-        <span>
-          <strong>{selected?.title || label}</strong>
-          <em>{selected?.subtitle || selected?.value || value}</em>
-        </span>
-        <b>{open ? "▲" : "▼"}</b>
-      </button>
-
-      {open ? (
-        <div className="cg-unified-dropdown__menu">
-          <input
-            autoFocus
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder={placeholder}
-          />
-
-          <div className="cg-unified-dropdown__list">
-            {filtered.length ? (
-              filtered.map((option) => (
-                <button
-                  type="button"
-                  key={option.value}
-                  className={option.value === value ? "cg-unified-dropdown__item cg-unified-dropdown__item--selected" : "cg-unified-dropdown__item"}
-                  onClick={() => {
-                    onChange(option.value);
-                    setQuery("");
-                    setOpen(false);
-                  }}
-                >
-                  <strong>{option.title}</strong>
-                  <span>{option.subtitle || option.value}</span>
-                </button>
-              ))
-            ) : (
-              <div className="cg-unified-dropdown__empty">No matches.</div>
-            )}
-          </div>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-
 
 export default function App() {
   const [state, setState] = useState<AppState>(() => loadState());
@@ -1434,40 +1342,17 @@ ${context.rawTruth.slice(0, 12000)}`;
     }
 
     if (panel.type === "local-llm") {
-      const selectedModel = localModels.find((model) => model.name === llmModel);
-      const modelOptions = localModels.length
-        ? localModels.map((model) => ({
-            value: model.name,
-            title: model.name,
-            subtitle: `${model.parameter_size} · ${model.quantization_level} · ${model.family}`,
-          }))
-        : [{ value: llmModel, title: llmModel || "No models discovered", subtitle: "Run scan to refresh local model truth." }];
-
       return (
-        <div className="cg-panel-content cg-local-llm-panel">
-          <label>Engine</label>
-          <ChronoDropdown
-            value={llmEngine}
-            options={[{ value: "ollama", title: "Ollama", subtitle: "Local Ollama model registry" }]}
-            onChange={setLlmEngine}
-            label={state.beginnerMode ? "LLM engine" : "engine"}
-            placeholder="Search engines..."
-            className="cg-local-llm-panel__dropdown"
-          />
-
-          <label>Model</label>
-          <ChronoDropdown
-            value={llmModel}
-            options={modelOptions}
-            onChange={setLlmModel}
-            label={state.beginnerMode ? "Local model" : "model"}
-            placeholder="Search local models..."
-            className="cg-local-llm-panel__dropdown"
-          />
-
-          <button onClick={() => loadLocalModels()}>{ui(state.beginnerMode, "Scan installed models", "ollama list")}</button>
-          <p>{selectedModel ? `${selectedModel.family} · ${selectedModel.parameter_size} · ${selectedModel.quantization_level} · ${(selectedModel.size / 1024 / 1024 / 1024).toFixed(1)} GB` : "Model metadata unavailable"}</p>
-        </div>
+        <LocalLlmPanel
+          beginnerMode={state.beginnerMode}
+          localModels={localModels}
+          llmEngine={llmEngine}
+          llmModel={llmModel}
+          setLlmEngine={setLlmEngine}
+          setLlmModel={setLlmModel}
+          loadLocalModels={() => loadLocalModels()}
+          ui={ui}
+        />
       );
     }
 

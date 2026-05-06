@@ -4,6 +4,16 @@ export type RepoInfo = {
   root: string;
 };
 
+export type LocalModel = {
+  name: string;
+  engine: string;
+  size: number;
+  modified_at?: string;
+  family: string;
+  parameter_size: string;
+  quantization_level: string;
+};
+
 export type GitRemoteStatus = {
   repo_path?: string;
   branch: string;

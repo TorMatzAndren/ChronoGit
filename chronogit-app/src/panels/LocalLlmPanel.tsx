@@ -1,89 +1,69 @@
-import type { ReactNode } from "react";
-
-type LocalModel = {
-  name: string;
-  engine: string;
-  size: number;
-  modified_at: string;
-  family: string;
-  parameter_size: string;
-  quantization_level: string;
-};
+import { ChronoDropdown } from "../components/ChronoDropdown";
+import type { LocalModel } from "../core/chronogitRuntimeTypes";
 
 type Props = {
-  llmEngine: string;
-  setLlmEngine: (engine: string) => void;
-  llmModel: string;
-  setLlmModel: (model: string) => void;
+  beginnerMode: boolean;
   localModels: LocalModel[];
-  selectedModel: LocalModel | undefined;
+  llmEngine: string;
+  llmModel: string;
+  setLlmEngine: (engine: string) => void;
+  setLlmModel: (model: string) => void;
   loadLocalModels: () => void;
-  beginnerTitle: (text: string) => string | undefined;
-  actionHelp: ReactNode;
+  ui: (beginnerMode: boolean, beginner: string, pro: string) => string;
 };
 
 export function LocalLlmPanel({
-  llmEngine,
-  setLlmEngine,
-  llmModel,
-  setLlmModel,
+  beginnerMode,
   localModels,
-  selectedModel,
+  llmEngine,
+  llmModel,
+  setLlmEngine,
+  setLlmModel,
   loadLocalModels,
-  beginnerTitle,
-  actionHelp,
+  ui,
 }: Props) {
+  const selectedModel = localModels.find((model) => model.name === llmModel);
+
+  const modelOptions = localModels.length
+    ? localModels.map((model) => ({
+        value: model.name,
+        title: model.name,
+        subtitle: `${model.parameter_size} · ${model.quantization_level} · ${model.family}`,
+      }))
+    : [{
+        value: llmModel,
+        title: llmModel || "No models discovered",
+        subtitle: "Run scan to refresh local model truth.",
+      }];
+
   return (
-    <div className="llm-main-card">
-      <div className="llm-main-card__title">Local LLM</div>
-      <div className="llm-main-card__note">Local-only explain layer. No cloud API.</div>
+    <div className="cg-panel-content cg-local-llm-panel">
+      <label>Engine</label>
+      <ChronoDropdown
+        value={llmEngine}
+        options={[{ value: "ollama", title: "Ollama", subtitle: "Local Ollama model registry" }]}
+        onChange={setLlmEngine}
+        label={beginnerMode ? "LLM engine" : "engine"}
+        placeholder="Search engines..."
+        className="cg-local-llm-panel__dropdown"
+      />
 
-      <div className="llm-main-card__controls">
-        <label>
-          Engine
-          <select
-            value={llmEngine}
-            onChange={(event) => setLlmEngine(event.target.value)}
-          >
-            <option value="ollama">Ollama</option>
-          </select>
-        </label>
+      <label>Model</label>
+      <ChronoDropdown
+        value={llmModel}
+        options={modelOptions}
+        onChange={setLlmModel}
+        label={beginnerMode ? "Local model" : "model"}
+        placeholder="Search local models..."
+        className="cg-local-llm-panel__dropdown"
+      />
 
-        <label>
-          Model
-          <select
-            value={llmModel}
-            onChange={(event) => setLlmModel(event.target.value)}
-          >
-            {localModels.length ? (
-              localModels.map((model) => (
-                <option key={model.name} value={model.name}>
-                  {model.name} · {model.parameter_size} · {model.quantization_level}
-                </option>
-              ))
-            ) : (
-              <option value={llmModel}>{llmModel || "No models discovered"}</option>
-            )}
-          </select>
-        </label>
-      </div>
-
-      <div className="llm-main-card__meta">
+      <button onClick={loadLocalModels}>{ui(beginnerMode, "Scan installed models", "ollama list")}</button>
+      <p>
         {selectedModel
           ? `${selectedModel.family} · ${selectedModel.parameter_size} · ${selectedModel.quantization_level} · ${(selectedModel.size / 1024 / 1024 / 1024).toFixed(1)} GB`
           : "Model metadata unavailable"}
-      </div>
-
-      <div className="button-with-help">
-        <button
-          className="status-refresh-button"
-          title={beginnerTitle("Scan installed models\n\nAsks the selected local LLM engine which models are installed on this computer.")}
-          onClick={loadLocalModels}
-        >
-          Scan installed models
-        </button>
-        {actionHelp}
-      </div>
+      </p>
     </div>
   );
 }
