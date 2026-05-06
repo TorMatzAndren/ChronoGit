@@ -9,6 +9,7 @@ import { SystemLogPanel } from "./panels/SystemLogPanel";
 import { NotesPanel } from "./panels/NotesPanel";
 import { CurrentStatePanel } from "./panels/CurrentStatePanel";
 import { CommitPreflightPanel } from "./panels/CommitPreflightPanel";
+import { ChangeListsPanel } from "./panels/ChangeListsPanel";
 import { RemoteStatusPanel } from "./panels/RemoteStatusPanel";
 import { LocalLlmPanel } from "./panels/LocalLlmPanel";
 import { TimeMachinePanel } from "./panels/TimeMachinePanel";
@@ -268,37 +269,6 @@ function hasInterruptedOperation(state: GitOperationState | null) {
   );
 }
 
-function plainStatus(change: FileChange) {
-  if (change.staged) {
-    if (change.status === "added") return "Prepared new file";
-    if (change.status === "modified") return "Prepared edit";
-    if (change.status === "deleted") return "Prepared deletion";
-    return "Prepared change";
-  }
-  if (change.status === "untracked") return "New unprepared file";
-  if (change.status === "modified") return "Edited but not prepared";
-  if (change.status === "deleted") return "Deleted but not prepared";
-  if (change.status === "conflict") return "Conflict";
-  return "Working folder change";
-}
-
-function riskTitle(risk: string) {
-  if (risk === "critical") return "Critical / conflicts";
-  if (risk === "danger") return "Danger / destructive";
-  if (risk === "evidence") return "Evidence / backup files";
-  if (risk === "review") return "Needs review";
-  return "Safe changes";
-}
-
-function group(changes: FileChange[]) {
-  const grouped: Record<string, FileChange[]> = { critical: [], danger: [], evidence: [], review: [], normal: [] };
-  for (const change of changes) {
-    if (grouped[change.risk]) grouped[change.risk].push(change);
-    else grouped.review.push(change);
-  }
-  return grouped;
-}
-
 function classifySnapshotImpact(preflight: CommitPreflight | null) {
   if (!preflight) return null;
   const churn = preflight.insertions + preflight.deletions;
@@ -524,7 +494,6 @@ export default function App() {
   const [renameTabId, setRenameTabId] = useState("");
   const [renameTabText, setRenameTabText] = useState("");
   const [busyPath, setBusyPath] = useState("");
-  const [expandedPath, setExpandedPath] = useState("");
   const [commitMessage, setCommitMessage] = useState("");
   const [showPreflight, setShowPreflight] = useState(false);
   const [commitPreflight, setCommitPreflight] = useState<CommitPreflight | null>(null);
@@ -1053,79 +1022,6 @@ ${context.rawTruth.slice(0, 12000)}`;
     }
   }
 
-  function renderChangeCard(change: FileChange) {
-    const expanded = expandedPath === `${change.path}:${change.staged}`;
-    return (
-      <article className={`change-card change-card--${change.risk}`} key={`${change.path}-${change.status}-${change.staged}`}>
-        <div className="change-card__top">
-          <div>
-            <div className="change-card__path">{change.path}</div>
-            <div className="change-card__plain">{plainStatus(change)}</div>
-          </div>
-          <div className={`risk-pill risk-pill--${change.risk}`}>{change.risk}</div>
-        </div>
-        <div className="change-card__explain">{change.explanation}</div>
-        {expanded ? (
-          <div className="explain-box">
-            <strong>{ui(state.beginnerMode, "What this means", "git status interpretation")}</strong>
-            <p>{plainStatus(change)}. Risk: {change.risk}. Git index/worktree: {change.index_status || "·"}{change.worktree_status || "·"}.</p>
-          </div>
-        ) : null}
-        <div className="change-card__actions">
-          <button onClick={() => setExpandedPath(expanded ? "" : `${change.path}:${change.staged}`)}>
-            {ui(state.beginnerMode, expanded ? "Hide explanation" : "Explain", expanded ? "hide" : "explain")}
-          </button>
-          <button disabled={uiExplainBusy || !llmModel} onClick={() => explainUiContext({
-            kind: "file_status",
-            title: `Explain file state: ${change.path}`,
-            plainText: `${plainStatus(change)}. Risk: ${change.risk}. ${change.explanation}`,
-            rawTruth: JSON.stringify(change, null, 2),
-          })}>
-            {ui(state.beginnerMode, "Ask LLM", "explain_context")}
-          </button>
-          {!change.staged ? (
-            <button disabled={busyPath === change.path} onClick={() => runFileAction("git_stage", change.path)}>
-              {ui(state.beginnerMode, "Prepare for commit", "git add")}
-            </button>
-          ) : (
-            <button disabled={busyPath === change.path} onClick={() => runFileAction("git_unstage", change.path)}>
-              {ui(state.beginnerMode, "Remove from next commit", "git reset")}
-            </button>
-          )}
-          {!change.staged && change.status !== "untracked" ? (
-            <button className="danger-button" disabled={busyPath === change.path} onClick={() => runFileAction("git_restore", change.path)}>
-              {ui(state.beginnerMode, "Restore / discard", "git restore")}
-            </button>
-          ) : null}
-          {!change.staged && change.status === "untracked" ? (
-            <>
-              <button className="danger-button" disabled={busyPath === change.path} onClick={() => runFileAction("git_remove_untracked", change.path)}>
-                {ui(state.beginnerMode, "Remove untracked file", "rm")}
-              </button>
-              <button disabled={busyPath === change.path} onClick={() => runFileAction("git_ignore_path", change.path)}>
-                {ui(state.beginnerMode, "Add to .gitignore", "append .gitignore")}
-              </button>
-            </>
-          ) : null}
-        </div>
-      </article>
-    );
-  }
-
-  function renderGroupedChanges(items: FileChange[]) {
-    const grouped = group(items);
-    return ["critical", "danger", "evidence", "review", "normal"].map((risk) => {
-      const rows = grouped[risk];
-      if (!rows.length) return null;
-      return (
-        <section className="risk-section" key={risk}>
-          <h3>{riskTitle(risk)} <span>{rows.length}</span></h3>
-          {rows.map(renderChangeCard)}
-        </section>
-      );
-    });
-  }
-
   function renderPanel(panel: PanelInstance) {
     if (panel.type === "current-state") {
       return (
@@ -1171,16 +1067,17 @@ ${context.rawTruth.slice(0, 12000)}`;
 
     if (panel.type === "change-lists") {
       return (
-        <div className="cg-panel-content cg-change-lists">
-          <div>
-            <h3>{ui(state.beginnerMode, "Prepared for next commit", "index / staged")}</h3>
-            {data?.staged.length ? renderGroupedChanges(data.staged) : <p>Nothing prepared.</p>}
-          </div>
-          <div>
-            <h3>{ui(state.beginnerMode, "Working folder changes", "worktree")}</h3>
-            {data?.working.length ? renderGroupedChanges(data.working) : <p>Working folder clean.</p>}
-          </div>
-        </div>
+        <ChangeListsPanel
+          beginnerMode={state.beginnerMode}
+          staged={data?.staged || []}
+          working={data?.working || []}
+          busyPath={busyPath}
+          uiExplainBusy={uiExplainBusy}
+          llmModel={llmModel}
+          runFileAction={runFileAction}
+          explainUiContext={explainUiContext}
+          ui={ui}
+        />
       );
     }
 
