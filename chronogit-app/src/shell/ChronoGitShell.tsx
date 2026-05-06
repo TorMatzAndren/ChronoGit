@@ -1,3 +1,4 @@
+import jarriLogo from "../assets/jarri-logo.png";
 import type { RepoInfo } from "../core/chronogitRuntimeTypes";
 import type { WorkspaceTab } from "../core/chronogitWorkspaceTypes";
 import { TabBar } from "../tabs/TabBar";
@@ -46,9 +47,12 @@ export function ChronoGitShell({
     <section className="chronogit-shell">
       <div className="chronogit-shell__titlebar">
         <div className="chronogit-shell__identity">
-          <div className="chronogit-shell__eyebrow">Deterministic Git Workspace</div>
-          <h1>ChronoGit</h1>
-          <span>Git is truth · layouts are projections</span>
+          <img src={jarriLogo} alt="Jarri" className="chronogit-shell__logo" />
+          <div className="chronogit-shell__identity-text">
+            <div className="chronogit-shell__eyebrow">Deterministic Git Workspace</div>
+            <h1>ChronoGit</h1>
+            <span>Git is truth · layouts are projections</span>
+          </div>
         </div>
 
         <div className="chronogit-shell__controls">

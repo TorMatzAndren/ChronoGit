@@ -2,8 +2,67 @@
   min-height: 420px;
 }
 
-.chronogit-workspace-canvas--legacy {
-  min-height: 0;
+.chronogit-workspace-toolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: flex-start;
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  border: 1px solid rgba(100, 240, 200, 0.16);
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.20);
+}
+
+.chronogit-workspace-toolbar strong {
+  display: block;
+  color: #64f0c8;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.chronogit-workspace-toolbar span {
+  display: block;
+  margin-top: 3px;
+  color: #8f9aae;
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.chronogit-workspace-toolbar__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 7px;
+  align-items: end;
+}
+
+.chronogit-workspace-toolbar__actions label {
+  display: grid;
+  gap: 3px;
+  color: #8f9aae;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.chronogit-workspace-toolbar__actions select {
+  min-width: 190px;
+  color-scheme: dark;
+  background: #071014;
+  color: #dfffee;
+  border: 1px solid rgba(100, 240, 200, 0.28);
+  border-radius: 7px;
+  padding: 4px 8px;
+  font-size: 11px;
+}
+
+.chronogit-workspace-grid {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 600px;
 }
 
 .chronogit-workspace-placeholder {
@@ -33,4 +92,30 @@
   color: #c8d2e2;
   font-size: 12px;
   line-height: 1.45;
+}
+
+@media (max-width: 1200px) {
+  .chronogit-workspace-toolbar {
+    flex-direction: column;
+  }
+
+  .chronogit-workspace-toolbar__actions {
+    justify-content: flex-start;
+  }
+
+  .chronogit-workspace-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+
+.chronogit-workspace-grid--dragging {
+  user-select: none;
+}
+
+.chronogit-workspace-grid--dragging .chronogit-panel-frame:not(.chronogit-panel-frame--dragging) {
+  transition:
+    transform 0.12s ease,
+    border-color 0.12s ease,
+    background 0.12s ease;
 }

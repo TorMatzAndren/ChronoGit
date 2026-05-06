@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use tauri::Emitter;
 use std::process::Command;
 
 #[derive(Serialize)]
@@ -1569,6 +1570,114 @@ struct OllamaTagDetails {
     quantization_level: Option<String>,
 }
 
+
+#[derive(Deserialize)]
+struct OllamaStreamChunk {
+    response: Option<String>,
+    done: Option<bool>,
+    error: Option<String>,
+}
+
+#[derive(Serialize, Clone)]
+struct LlmStreamEvent {
+    stream_id: String,
+    chunk: String,
+    done: bool,
+    error: Option<String>,
+}
+
+#[tauri::command]
+fn explain_prompt_with_ollama_stream(
+    window: tauri::Window,
+    model: String,
+    stream_id: String,
+    title: String,
+    prompt: String,
+) -> Result<ExplainDiffResult, String> {
+    let local_models = list_local_llm_models("ollama".to_string())?;
+    if !local_models.iter().any(|local_model| local_model.name == model) {
+        return Err(format!("Model blocked or unavailable locally: {}", model));
+    }
+
+    let clipped_prompt: String = prompt.chars().take(26000).collect();
+
+    let request = OllamaGenerateRequest {
+        model: model.clone(),
+        prompt: clipped_prompt,
+        stream: true,
+    };
+
+    let response = reqwest::blocking::Client::new()
+        .post("http://127.0.0.1:11434/api/generate")
+        .json(&request)
+        .send()
+        .map_err(|e| format!("Could not call local Ollama API: {}", e))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().unwrap_or_else(|_| "Could not read Ollama error body.".to_string());
+        return Err(format!("Ollama API failed with {}: {}", status, body));
+    }
+
+    let mut full = String::new();
+    let reader = std::io::BufReader::new(response);
+
+    for line_result in std::io::BufRead::lines(reader) {
+        let line = line_result.map_err(|e| format!("Could not read Ollama stream: {}", e))?;
+        if line.trim().is_empty() {
+            continue;
+        }
+
+        let parsed: OllamaStreamChunk = serde_json::from_str(&line)
+            .map_err(|e| format!("Could not parse Ollama stream chunk: {}", e))?;
+
+        if let Some(error) = parsed.error {
+            let _ = window.emit("chronogit://llm-stream", LlmStreamEvent {
+                stream_id: stream_id.clone(),
+                chunk: String::new(),
+                done: true,
+                error: Some(error.clone()),
+            });
+            return Err(error);
+        }
+
+        let chunk = parsed.response.unwrap_or_default();
+        if !chunk.is_empty() {
+            full.push_str(&chunk);
+            let _ = window.emit("chronogit://llm-stream", LlmStreamEvent {
+                stream_id: stream_id.clone(),
+                chunk,
+                done: false,
+                error: None,
+            });
+        }
+
+        if parsed.done.unwrap_or(false) {
+            break;
+        }
+    }
+
+    let mut cleaned = clean_ollama_text(&full);
+    if cleaned.is_empty() {
+        cleaned = format!("Local LLM finished, but returned no readable explanation for: {}", title);
+    }
+
+    let _ = window.emit("chronogit://llm-stream", LlmStreamEvent {
+        stream_id: stream_id.clone(),
+        chunk: String::new(),
+        done: true,
+        error: None,
+    });
+
+    Ok(ExplainDiffResult {
+        model,
+        explanation: cleaned,
+        tdp_before_watts: "streamed".to_string(),
+        tdp_active_watts: "unchanged".to_string(),
+        tdp_reset_watts: "unchanged".to_string(),
+    })
+}
+
 #[tauri::command]
 fn list_local_llm_models(engine: String) -> Result<Vec<LocalModel>, String> {
     if engine != "ollama" {
@@ -2367,6 +2476,7 @@ pub fn run() {
             git_file_history,
             explain_diff_with_ollama,
             explain_context_with_ollama,
+            explain_prompt_with_ollama_stream,
             explain_comparison_with_ollama,
             list_local_llm_models,
             git_restore_file_from_commit

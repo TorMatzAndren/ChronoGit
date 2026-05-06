@@ -1,16 +1,15 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import "./App.css";
 import jarriLogo from "./assets/jarri-logo.png";
-import { TimelinePanel } from "./panels/TimelinePanel";
-import { ChronoGitShell } from "./shell/ChronoGitShell";
-import { WorkspaceCanvas } from "./workspace/WorkspaceCanvas";
-import { createDefaultWorkspaceTabs, type WorkspaceTab } from "./core/chronogitWorkspaceTypes";
+import { PANEL_REGISTRY } from "./panels/panelRegistry";
+import type { PanelInstance, PanelType, WorkspaceTab } from "./core/chronogitWorkspaceTypes";
 
 type FileChange = {
   path: string;
-  index_status: string;
-  worktree_status: string;
+  index_status?: string;
+  worktree_status?: string;
   status: string;
   risk: string;
   staged: boolean;
@@ -30,16 +29,16 @@ type RepoInfo = {
 };
 
 type GitRemoteStatus = {
-  repo_path: string;
+  repo_path?: string;
   branch: string;
   upstream: string | null;
-  remote: string | null;
+  remote?: string | null;
   remote_url: string | null;
   ahead: number;
   behind: number;
   has_remote: boolean;
   is_diverged: boolean;
-  is_clean: boolean;
+  is_clean?: boolean;
 };
 
 type GitOperationState = {
@@ -64,14 +63,34 @@ type CommitPreflight = {
   is_empty: boolean;
 };
 
+type HistoryCommit = {
+  hash: string;
+  short_hash: string;
+  author: string;
+  timestamp: string;
+  message: string;
+};
 
 type ChangedFile = {
   path: string;
   status: string;
 };
 
+type DiffResult = {
+  commit_hash: string;
+  diff: string;
+};
 
-
+type CommitComparison = {
+  left_commit: string;
+  right_commit: string;
+  left_label: string;
+  right_label: string;
+  changed_files: ChangedFile[];
+  insertions: number;
+  deletions: number;
+  diff: string;
+};
 
 type RemotePullResult = {
   ok: boolean;
@@ -135,307 +154,11 @@ type LocalModel = {
   name: string;
   engine: string;
   size: number;
-  modified_at: string;
+  modified_at?: string;
   family: string;
   parameter_size: string;
   quantization_level: string;
 };
-
-
-
-function classifySnapshotImpact(preflight: CommitPreflight | null) {
-  if (!preflight) return null;
-
-  const churn = preflight.insertions + preflight.deletions;
-  const flags: string[] = [];
-
-  if (churn >= 500) flags.push("Large snapshot");
-  if (preflight.insertions >= preflight.deletions * 5 && preflight.insertions >= 100) flags.push("Additive-heavy");
-  if (preflight.deletions >= 50) flags.push("Deletion-heavy");
-
-  if (!flags.length) return null;
-
-  return {
-    label: flags.join(" · "),
-    text:
-      churn >= 500
-        ? "This snapshot contains a large amount of changed text. Review the included files before creating history."
-        : "This snapshot has an unusual change shape. Review the included files before creating history.",
-  };
-}
-
-function snapshotRemoteSentence(remote: GitRemoteStatus | null) {
-  if (!remote || !remote.has_remote) {
-    return "No remote is attached. This snapshot stays only on this computer.";
-  }
-
-  if (remote.is_diverged) {
-    return `Remote context: your branch is diverged (+${remote.ahead} / -${remote.behind}). This snapshot still remains local until pushed.`;
-  }
-
-  if (remote.ahead > 0) {
-    return `Remote context: you already have ${remote.ahead} local snapshot(s) not uploaded. This new snapshot will increase that local-ahead count.`;
-  }
-
-  if (remote.behind > 0) {
-    return `Remote context: the remote has ${remote.behind} snapshot(s) you do not have locally. Consider reviewing before sharing new work.`;
-  }
-
-  return "Remote context: local and remote are currently in sync. This new snapshot still remains local until pushed.";
-}
-
-
-function beginnerHelpTitle(title: string, body: string) {
-  return `${title}\n\n${body}`;
-}
-
-function maybeBeginnerTitle(enabled: boolean, title: string, body: string) {
-  return enabled ? beginnerHelpTitle(title, body) : undefined;
-}
-
-function mergeClassificationCondition(preview: RemoteOperationPreview) {
-  if (preview.merge_safety.working_changes > 0) return "Working tree not clean";
-  return "No extra condition flags.";
-}
-
-function guardedRemoteToken(preview: RemoteOperationPreview) {
-  if (preview.merge_safety.risk_level === "HIGH") return "override";
-  return "confirm";
-}
-
-function remoteSafetyGateTitle(preview: RemoteOperationPreview) {
-  if (preview.operation === "download_updates_preview") {
-    if (preview.merge_safety.risk_level === "HIGH") return "Download blocked by default";
-    if (preview.merge_safety.risk_level === "MEDIUM") return "Download needs review first";
-    return "Download appears low-risk";
-  }
-
-  if (preview.operation === "upload_snapshots_preview") {
-    if (preview.behind > 0) return "Upload does not resolve divergence";
-    return "Upload appears straightforward";
-  }
-
-  return "Remote action needs review";
-}
-
-function remoteSafetyGateText(preview: RemoteOperationPreview) {
-  if (preview.operation === "download_updates_preview") {
-    if (preview.merge_safety.risk_level === "HIGH") return "Do not perform a real download/merge yet unless this is intentional. Same-path overlap and dirty working state can cause conflict.";
-    if (preview.merge_safety.risk_level === "MEDIUM") return "Review before real download. Clean or snapshot working changes first if possible.";
-    return "No same-path overlap or dirty working state was detected. Git remains authoritative.";
-  }
-
-  if (preview.operation === "upload_snapshots_preview") {
-    if (preview.behind > 0) return "You can upload local snapshots, but the branch will still be diverged because remote-only snapshots also exist.";
-    return "Upload would publish local snapshots to the configured remote. Working files are not changed by upload.";
-  }
-
-  return "Preview only.";
-}
-
-function remoteRecommendedAction(preview: RemoteOperationPreview) {
-  if (preview.operation === "download_updates_preview") {
-    if (preview.merge_safety.risk_level === "HIGH") return "Recommended: stop, clean/snapshot working changes, inspect overlap, then intentionally override only if you mean it.";
-    if (preview.merge_safety.risk_level === "MEDIUM") return "Recommended: clean or snapshot local working changes before download/merge.";
-    return "Recommended: safe to consider real download when ready.";
-  }
-
-  if (preview.operation === "upload_snapshots_preview") {
-    if (preview.behind > 0) return "Recommended: understand remote-only work before treating upload as synchronization.";
-    return "Recommended: safe to consider real upload if these snapshots should be shared.";
-  }
-
-  return "Recommended: review Git truth before acting.";
-}
-
-function guardedRemoteActionTitle(preview: RemoteOperationPreview) {
-  const action = preview.operation === "download_updates_preview" ? "Download updates" : "Upload snapshots";
-  if (preview.merge_safety.risk_level === "HIGH") return `${action}: high-risk override required`;
-  if (preview.merge_safety.risk_level === "MEDIUM") return `${action}: confirmation required`;
-  return `${action}: low-risk confirmation`;
-}
-
-function guardedRemoteActionBody(preview: RemoteOperationPreview) {
-  const action = preview.operation === "download_updates_preview" ? "download/merge remote updates" : "upload local snapshots";
-
-  return [
-    `Requested action: ${action}`,
-    ``,
-    `Risk: ${preview.merge_safety.risk_level}`,
-    `Classification: ${preview.merge_safety.classification}`,
-    `Condition: ${mergeClassificationCondition(preview)}`,
-    `Ahead / behind: +${preview.ahead} / -${preview.behind}`,
-    ``,
-    `Safety summary:`,
-    preview.merge_safety.summary,
-    ``,
-    `Warning:`,
-    preview.merge_safety.warning,
-    ``,
-    preview.operation === "download_updates_preview"
-      ? `Important: confirming this will run git pull --rebase --autostash. If Git reports a conflict, use Abort rebase before trying another strategy.`
-      : `Important: this first confirmation only acknowledges the upload preview. No Git push happens until you press Execute push after acknowledgement.`,
-  ].join("\n");
-}
-
-function guardedRemoteActionLabel(preview: RemoteOperationPreview) {
-  if (preview.merge_safety.risk_level === "HIGH") return "I understand: override high-risk gate";
-  if (preview.merge_safety.risk_level === "MEDIUM") return "Confirm medium-risk intention";
-  return "Confirm low-risk intention";
-}
-
-function guardedRemoteActionPolicy(preview: RemoteOperationPreview) {
-  if (preview.merge_safety.risk_level === "HIGH") return "Blocked by default. Intentional override requires typing override.";
-  if (preview.merge_safety.risk_level === "MEDIUM") return "Proceed with caution: explicit confirmation required.";
-  return "Low-risk. Confirmation is still shown because remote actions affect shared history or local files.";
-}
-
-
-function remoteStateLabel(remote: GitRemoteStatus | null) {
-  if (!remote || !remote.has_remote) return "LOCAL ONLY";
-  if (remote.is_diverged) return "DIVERGED";
-  if (remote.ahead > 0) return "AHEAD";
-  if (remote.behind > 0) return "BEHIND";
-  return "IN SYNC";
-}
-
-function remoteStateClass(remote: GitRemoteStatus | null) {
-  return remoteStateLabel(remote).toLowerCase().replace(/ /g, "-");
-}
-
-function remoteTruthText(remote: GitRemoteStatus | null) {
-  if (!remote || !remote.has_remote) return "LOCAL";
-  if (remote.is_diverged) return `+${remote.ahead}/-${remote.behind}`;
-  if (remote.ahead > 0) return `+${remote.ahead}`;
-  if (remote.behind > 0) return `-${remote.behind}`;
-  return "SYNC";
-}
-
-function explainRemoteHuman(remote: GitRemoteStatus | null) {
-  if (!remote || !remote.has_remote) {
-    return "This project is local-only right now. Commits stay on this computer unless a remote is later added and pushed.";
-  }
-
-  if (remote.is_diverged) {
-    return "Both your local branch and the remote have commits the other side does not have.";
-  }
-
-  if (remote.ahead > 0) {
-    return "You have local commits that are not uploaded to the remote.";
-  }
-
-  if (remote.behind > 0) {
-    return "The remote has commits that you do not have locally yet.";
-  }
-
-  return "Your local branch and its remote tracking branch are in sync.";
-}
-
-function group(changes: FileChange[]) {
-  const grouped: Record<string, FileChange[]> = {
-    critical: [],
-    danger: [],
-    evidence: [],
-    review: [],
-    normal: [],
-  };
-
-  for (const change of changes) {
-    if (!grouped[change.risk]) grouped.review.push(change);
-    else grouped[change.risk].push(change);
-  }
-
-  return grouped;
-}
-
-function riskTitle(risk: string) {
-  switch (risk) {
-    case "critical": return "Critical / conflicts";
-    case "danger": return "Danger / destructive";
-    case "evidence": return "Evidence / backup files";
-    case "review": return "Needs review";
-    default: return "Safe changes";
-  }
-}
-
-function plainStatus(change: FileChange) {
-  if (change.staged) {
-    if (change.status === "added") return "Prepared new file";
-    if (change.status === "modified") return "Prepared edit";
-    if (change.status === "deleted") return "Prepared deletion";
-    return "Prepared change";
-  }
-
-  if (change.status === "untracked") return "New unprepared file";
-  if (change.status === "modified") return "Edited but not prepared";
-  if (change.status === "deleted") return "Deleted but not prepared";
-  return "Working folder change";
-}
-
-function explainEntry(change: FileChange) {
-  if (change.status === "untracked" && change.risk === "evidence") {
-    return [
-      "This file is untracked and looks like a backup or temporary artifact.",
-      "It exists in your folder, but it is not part of Git history.",
-      "Prepare it only if you intentionally want this backup-like file saved.",
-      "Usually safe choice: leave it unprepared, delete it manually if unwanted, or later add ignore rules.",
-    ];
-  }
-
-  if (change.status === "untracked") {
-    return [
-      "This file is untracked.",
-      "Git sees it in your folder, but it is not part of project history yet.",
-      "If you do nothing, it will not be included in the next snapshot.",
-      "Click “Prepare for commit” if this is real project material you want saved.",
-    ];
-  }
-
-  if (change.status === "modified" && change.staged) {
-    return [
-      "This tracked file has been edited and is already prepared.",
-      "If you create a snapshot now, this edited version will be included.",
-      "You can remove it from the next commit without deleting the file.",
-    ];
-  }
-
-  if (change.status === "modified") {
-    return [
-      "This tracked file has changed since the last snapshot.",
-      "It is still only a working-folder change.",
-      "Prepare it if you want this edit included in the next snapshot.",
-      "Restore/discard will throw away your local edit and return the file to the last committed version.",
-    ];
-  }
-
-  if (change.status === "added") {
-    return [
-      "This is a new file that has been prepared for commit.",
-      "If you create a snapshot now, Git will start tracking it in history.",
-      "You can remove it from the next commit without deleting the file.",
-    ];
-  }
-
-  if (change.status === "deleted") {
-    return [
-      "This is a tracked file deletion.",
-      "If prepared and committed, the next snapshot records that the file was removed.",
-      "Only prepare or commit deletions when the removal is intentional.",
-    ];
-  }
-
-  if (change.status === "conflict") {
-    return [
-      "This file is in conflict.",
-      "Git could not automatically combine changes.",
-      "You must resolve the file manually before ChronoGit should allow a commit.",
-    ];
-  }
-
-  return ["Review this Git change before preparing or committing it."];
-}
-
-
 
 type ConfirmAction = {
   title: string;
@@ -458,75 +181,954 @@ type SystemLogEntry = {
 type LlmLogEntry = {
   id: string;
   timestamp: string;
-  source: "diff" | "ui" | "remote" | "preflight";
+  source: "diff" | "ui" | "remote" | "preflight" | "system_log";
   model: string;
   title: string;
   content: string;
+  streaming?: boolean;
+  collapsed?: boolean;
 };
+
+type LlmStreamEvent = {
+  stream_id: string;
+  chunk: string;
+  done: boolean;
+  error: string | null;
+};
+
+type AppState = {
+  activeTabId: string;
+  beginnerMode: boolean;
+  repoPath: string;
+  tabs: WorkspaceTab[];
+};
+
+const STORAGE_KEY = "chronogit_workspace_state_v3";
+const OLD_STORAGE_KEY = "chronogit_workspace_state_v2";
+const DEFAULT_REPO = "/home/dretski/projects/ChronoGit";
+const GRID = 12;
+
+function snap(value: number) {
+  return Math.round(value / GRID) * GRID;
+}
+
+function ui(beginnerMode: boolean, beginner: string, pro: string) {
+  return beginnerMode ? beginner : pro;
+}
+
+function titleFor(type: PanelType) {
+  return PANEL_REGISTRY.find((panel) => panel.type === type)?.title || "Panel";
+}
+
+function makePanel(type: PanelType, index = 0): PanelInstance {
+  return {
+    id: `panel-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    type,
+    title: titleFor(type),
+    x: 24 + index * 32,
+    y: 24 + index * 32,
+    w:
+      type === "change-lists" ? 860 :
+      type === "time-machine" ? 1040 :
+      type === "remote-actions" ? 860 :
+      type === "commit-preflight" ? 520 :
+      390,
+    h:
+      type === "change-lists" ? 420 :
+      type === "time-machine" ? 620 :
+      type === "remote-actions" ? 520 :
+      240,
+  };
+}
+
+function defaultState(): AppState {
+  return {
+    activeTabId: "home",
+    beginnerMode: true,
+    repoPath: DEFAULT_REPO,
+    tabs: [
+      {
+        id: "home",
+        name: "Home",
+        panels: [
+          { id: "state", type: "current-state", title: "Current State", x: 24, y: 24, w: 520, h: 220 },
+          { id: "preflight", type: "commit-preflight", title: "Commit Preflight", x: 568, y: 24, w: 520, h: 220 },
+          { id: "changes", type: "change-lists", title: "Change Lists", x: 24, y: 268, w: 900, h: 420 },
+          { id: "remote-actions", type: "remote-actions", title: "Remote Actions", x: 948, y: 268, w: 760, h: 420 },
+          { id: "time", type: "time-machine", title: "Time Machine", x: 24, y: 720, w: 1120, h: 620 },
+          { id: "llm", type: "local-llm", title: "Local LLM", x: 1170, y: 720, w: 420, h: 260 },
+        ],
+      },
+    ],
+  };
+}
+
+function normalizePanel(panel: Partial<PanelInstance>, index: number): PanelInstance {
+  const type = (panel.type || "empty") as PanelType;
+  return {
+    id: String(panel.id || `panel-${Date.now()}-${index}`),
+    type,
+    title: String(panel.title || titleFor(type)),
+    x: Number.isFinite(panel.x) ? Number(panel.x) : 24 + index * 32,
+    y: Number.isFinite(panel.y) ? Number(panel.y) : 24 + index * 32,
+    w: Number.isFinite(panel.w) ? Math.max(240, Number(panel.w)) : makePanel(type, index).w,
+    h: Number.isFinite(panel.h) ? Math.max(140, Number(panel.h)) : makePanel(type, index).h,
+  };
+}
+
+function normalizeState(input: unknown): AppState {
+  if (!input || typeof input !== "object") return defaultState();
+  const raw = input as Partial<AppState>;
+  if (!Array.isArray(raw.tabs) || !raw.tabs.length) return defaultState();
+
+  const tabs = raw.tabs.map((tab, tabIndex) => ({
+    id: String(tab.id || `tab-${tabIndex}`),
+    name: String(tab.name || `Tab ${tabIndex + 1}`),
+    panels: Array.isArray(tab.panels) && tab.panels.length
+      ? tab.panels.map(normalizePanel)
+      : [makePanel("current-state")],
+  }));
+
+  return {
+    activeTabId: tabs.some((tab) => tab.id === raw.activeTabId) ? String(raw.activeTabId) : tabs[0].id,
+    beginnerMode: raw.beginnerMode !== false,
+    repoPath: String(raw.repoPath || DEFAULT_REPO),
+    tabs,
+  };
+}
+
+function loadState(): AppState {
+  for (const key of [STORAGE_KEY, OLD_STORAGE_KEY]) {
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw) return normalizeState(JSON.parse(raw));
+    } catch {
+      // fall through
+    }
+  }
+  return defaultState();
+}
+
+function remoteLabel(remote: GitRemoteStatus | null) {
+  if (!remote || !remote.has_remote) return "LOCAL ONLY";
+  if (remote.is_diverged) return "DIVERGED";
+  if (remote.ahead > 0) return "AHEAD";
+  if (remote.behind > 0) return "BEHIND";
+  return "IN SYNC";
+}
+
+function remoteHuman(remote: GitRemoteStatus | null) {
+  if (!remote || !remote.has_remote) return "This repository is local-only. Commits stay on this computer until a remote is added and pushed.";
+  if (remote.is_diverged) return "Local and remote both have commits the other side does not have.";
+  if (remote.ahead > 0) return "You have local commits that are not uploaded.";
+  if (remote.behind > 0) return "The remote has commits you do not have locally.";
+  return "Local branch and remote tracking branch are in sync.";
+}
+
+function operationLabel(state: GitOperationState | null) {
+  if (!state) return "UNKNOWN";
+  if (state.conflicted_files.length > 0) return "CONFLICTS";
+  if (state.rebase_in_progress) return "REBASE IN PROGRESS";
+  if (state.merge_in_progress) return "MERGE IN PROGRESS";
+  if (state.cherry_pick_in_progress) return "CHERRY-PICK IN PROGRESS";
+  if (state.revert_in_progress) return "REVERT IN PROGRESS";
+  return "CLEAR";
+}
+
+function hasInterruptedOperation(state: GitOperationState | null) {
+  return Boolean(
+    state &&
+    (state.rebase_in_progress ||
+      state.merge_in_progress ||
+      state.cherry_pick_in_progress ||
+      state.revert_in_progress ||
+      state.conflicted_files.length > 0)
+  );
+}
+
+function plainStatus(change: FileChange) {
+  if (change.staged) {
+    if (change.status === "added") return "Prepared new file";
+    if (change.status === "modified") return "Prepared edit";
+    if (change.status === "deleted") return "Prepared deletion";
+    return "Prepared change";
+  }
+  if (change.status === "untracked") return "New unprepared file";
+  if (change.status === "modified") return "Edited but not prepared";
+  if (change.status === "deleted") return "Deleted but not prepared";
+  if (change.status === "conflict") return "Conflict";
+  return "Working folder change";
+}
+
+function riskTitle(risk: string) {
+  if (risk === "critical") return "Critical / conflicts";
+  if (risk === "danger") return "Danger / destructive";
+  if (risk === "evidence") return "Evidence / backup files";
+  if (risk === "review") return "Needs review";
+  return "Safe changes";
+}
+
+function group(changes: FileChange[]) {
+  const grouped: Record<string, FileChange[]> = { critical: [], danger: [], evidence: [], review: [], normal: [] };
+  for (const change of changes) {
+    if (grouped[change.risk]) grouped[change.risk].push(change);
+    else grouped.review.push(change);
+  }
+  return grouped;
+}
+
+function diffLineClass(line: string): string {
+  if (line.startsWith("+++") || line.startsWith("---")) return "diff-line diff-line--file";
+  if (line.startsWith("@@")) return "diff-line diff-line--hunk";
+  if (line.startsWith("+")) return "diff-line diff-line--add";
+  if (line.startsWith("-")) return "diff-line diff-line--remove";
+  if (line.startsWith("diff --git")) return "diff-line diff-line--header";
+  return "diff-line";
+}
+
+function classifySnapshotImpact(preflight: CommitPreflight | null) {
+  if (!preflight) return null;
+  const churn = preflight.insertions + preflight.deletions;
+  const flags: string[] = [];
+  if (churn >= 500) flags.push("Large snapshot");
+  if (preflight.insertions >= preflight.deletions * 5 && preflight.insertions >= 100) flags.push("Additive-heavy");
+  if (preflight.deletions >= 50) flags.push("Deletion-heavy");
+  if (!flags.length) return null;
+  return {
+    label: flags.join(" · "),
+    text: churn >= 500
+      ? "This snapshot contains a large amount of changed text. Review included files before creating history."
+      : "This snapshot has an unusual change shape. Review included files before creating history.",
+  };
+}
+
+function snapshotRemoteSentence(remote: GitRemoteStatus | null) {
+  if (!remote || !remote.has_remote) return "No remote is attached. This snapshot stays only on this computer.";
+  if (remote.is_diverged) return `Remote context: diverged (+${remote.ahead} / -${remote.behind}). This snapshot remains local until pushed.`;
+  if (remote.ahead > 0) return `Remote context: ${remote.ahead} local snapshot(s) not uploaded. This snapshot increases that count.`;
+  if (remote.behind > 0) return `Remote context: remote has ${remote.behind} snapshot(s) you do not have locally.`;
+  return "Remote context: local and remote are in sync. This snapshot remains local until pushed.";
+}
+
+function mergeClassificationCondition(preview: RemoteOperationPreview) {
+  if (preview.merge_safety.working_changes > 0) return "Working tree not clean";
+  return "No extra condition flags.";
+}
+
+function guardedRemoteToken(preview: RemoteOperationPreview) {
+  return preview.merge_safety.risk_level === "HIGH" ? "override" : "confirm";
+}
+
+function remoteSafetyGateTitle(preview: RemoteOperationPreview) {
+  if (preview.operation === "download_updates_preview") {
+    if (preview.merge_safety.risk_level === "HIGH") return "Download blocked by default";
+    if (preview.merge_safety.risk_level === "MEDIUM") return "Download needs review first";
+    return "Download appears low-risk";
+  }
+  if (preview.behind > 0) return "Upload does not resolve divergence";
+  return "Upload appears straightforward";
+}
+
+function remoteSafetyGateText(preview: RemoteOperationPreview) {
+  if (preview.operation === "download_updates_preview") {
+    if (preview.merge_safety.risk_level === "HIGH") return "Same-path overlap and dirty working state can cause conflict.";
+    if (preview.merge_safety.risk_level === "MEDIUM") return "Review first. Clean or snapshot working changes if possible.";
+    return "No same-path overlap or dirty working state was detected.";
+  }
+  if (preview.behind > 0) return "Upload can publish local commits, but remote-only commits still exist.";
+  return "Upload would publish local snapshots. Working files should not change.";
+}
+
+function guardedRemoteActionTitle(preview: RemoteOperationPreview) {
+  const action = preview.operation === "download_updates_preview" ? "Download updates" : "Upload snapshots";
+  if (preview.merge_safety.risk_level === "HIGH") return `${action}: high-risk override required`;
+  if (preview.merge_safety.risk_level === "MEDIUM") return `${action}: confirmation required`;
+  return `${action}: low-risk confirmation`;
+}
+
+function guardedRemoteActionBody(preview: RemoteOperationPreview) {
+  const action = preview.operation === "download_updates_preview" ? "download/merge remote updates" : "upload local snapshots";
+  return [
+    `Requested action: ${action}`,
+    "",
+    `Risk: ${preview.merge_safety.risk_level}`,
+    `Classification: ${preview.merge_safety.classification}`,
+    `Condition: ${mergeClassificationCondition(preview)}`,
+    `Ahead / behind: +${preview.ahead} / -${preview.behind}`,
+    "",
+    "Safety summary:",
+    preview.merge_safety.summary,
+    "",
+    "Warning:",
+    preview.merge_safety.warning,
+  ].join("\n");
+}
+
+function guardedRemoteActionLabel(preview: RemoteOperationPreview) {
+  if (preview.merge_safety.risk_level === "HIGH") return "I understand: override high-risk gate";
+  if (preview.merge_safety.risk_level === "MEDIUM") return "Confirm medium-risk intention";
+  return "Confirm low-risk intention";
+}
+
+function renderPrettyDiff(diff: string, selectedLines: Set<number>, onToggleLine: (line: number) => void) {
+  if (!diff.trim()) return <div className="diff-placeholder">No diff for this file.</div>;
+  const lines = diff.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+  return (
+    <div className="diff-pretty">
+      {lines.map((line, index) => {
+        const lineNumber = index + 1;
+        return (
+          <div
+            key={`${index}-${line.slice(0, 18)}`}
+            className={`${diffLineClass(line)} ${selectedLines.has(lineNumber) ? "diff-line--selected" : ""}`}
+            onClick={() => onToggleLine(lineNumber)}
+          >
+            <span className="diff-line__num">{lineNumber}</span>
+            <code className="diff-line__text">{line || " "}</code>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function RepoDropdown({
+  value,
+  repos,
+  onChange,
+  beginnerMode,
+}: {
+  value: string;
+  repos: RepoInfo[];
+  onChange: (repoPath: string) => void;
+  beginnerMode: boolean;
+}) {
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const selectedRepo = repos.find((repo) => repo.path === value);
+  const filteredRepos = repos.filter((repo) => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return true;
+    return `${repo.name} ${repo.path}`.toLowerCase().includes(needle);
+  });
+
+  useEffect(() => {
+    function onPointerDown(event: PointerEvent) {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    }
+    window.addEventListener("pointerdown", onPointerDown);
+    return () => window.removeEventListener("pointerdown", onPointerDown);
+  }, []);
+
+  return (
+    <div className="cg-repo-dropdown" ref={rootRef}>
+      <button
+        type="button"
+        className="cg-repo-dropdown__button"
+        onClick={() => setOpen((current) => !current)}
+        title={beginnerMode ? "Select which local Git repository ChronoGit should inspect." : "repo selector"}
+      >
+        <span>
+          <strong>{selectedRepo?.name || "Selected repository"}</strong>
+          <em>{value}</em>
+        </span>
+        <b>{open ? "▲" : "▼"}</b>
+      </button>
+
+      {open ? (
+        <div className="cg-repo-dropdown__menu">
+          <input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search repositories..." />
+          <div className="cg-repo-dropdown__list">
+            {filteredRepos.length ? filteredRepos.map((repo) => (
+              <button
+                type="button"
+                key={repo.path}
+                className={repo.path === value ? "cg-repo-dropdown__item cg-repo-dropdown__item--active cg-repo-dropdown__item--selected" : "cg-repo-dropdown__item"}
+                onClick={() => {
+                  onChange(repo.path);
+                  setQuery("");
+                  setOpen(false);
+                }}
+              >
+                <strong>{repo.name}</strong>
+                <span>{repo.path}</span>
+              </button>
+            )) : <div className="cg-repo-dropdown__empty">No repositories match this search.</div>}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function PanelDropdown({
+  value,
+  onChange,
+  beginnerMode,
+}: {
+  value: PanelType;
+  onChange: (type: PanelType) => void;
+  beginnerMode: boolean;
+}) {
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const [open, setOpen] = useState(false);
+  const selected = PANEL_REGISTRY.find((panel) => panel.type === value) || PANEL_REGISTRY[0];
+
+  useEffect(() => {
+    function onPointerDown(event: PointerEvent) {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    }
+    window.addEventListener("pointerdown", onPointerDown);
+    return () => window.removeEventListener("pointerdown", onPointerDown);
+  }, []);
+
+  return (
+    <div className="cg-panel-dropdown" ref={rootRef}>
+      <button type="button" className="cg-panel-dropdown__button" onClick={() => setOpen((current) => !current)}>
+        <span>{selected.title}</span>
+        <b>{open ? "▲" : "▼"}</b>
+      </button>
+      {open ? (
+        <div className="cg-panel-dropdown__menu">
+          <div className="cg-panel-dropdown__list">
+            {PANEL_REGISTRY.map((panel) => (
+              <button
+                type="button"
+                key={panel.type}
+                className={panel.type === value ? "cg-panel-dropdown__item cg-panel-dropdown__item--active" : "cg-panel-dropdown__item"}
+                title={beginnerMode ? panel.description : panel.type}
+                onClick={() => {
+                  onChange(panel.type);
+                  setOpen(false);
+                }}
+              >
+                <strong>{panel.title}</strong>
+                <span>{beginnerMode ? panel.description : panel.type}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ChronoDropdown({
+  value,
+  options,
+  onChange,
+  label,
+  placeholder = "Search...",
+  className = "",
+}: {
+  value: string;
+  options: { value: string; title: string; subtitle?: string }[];
+  onChange: (value: string) => void;
+  label: string;
+  placeholder?: string;
+  className?: string;
+}) {
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+
+  const selected = options.find((option) => option.value === value);
+  const filtered = options.filter((option) => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return true;
+    return `${option.title} ${option.subtitle || ""} ${option.value}`.toLowerCase().includes(needle);
+  });
+
+  useEffect(() => {
+    function onPointerDown(event: PointerEvent) {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    }
+
+    window.addEventListener("pointerdown", onPointerDown);
+    return () => window.removeEventListener("pointerdown", onPointerDown);
+  }, []);
+
+  return (
+    <div className={`cg-unified-dropdown ${className}`} ref={rootRef}>
+      <button type="button" className="cg-unified-dropdown__button" onClick={() => setOpen((current) => !current)}>
+        <span>
+          <strong>{selected?.title || label}</strong>
+          <em>{selected?.subtitle || selected?.value || value}</em>
+        </span>
+        <b>{open ? "▲" : "▼"}</b>
+      </button>
+
+      {open ? (
+        <div className="cg-unified-dropdown__menu">
+          <input
+            autoFocus
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder={placeholder}
+          />
+
+          <div className="cg-unified-dropdown__list">
+            {filtered.length ? (
+              filtered.map((option) => (
+                <button
+                  type="button"
+                  key={option.value}
+                  className={option.value === value ? "cg-unified-dropdown__item cg-unified-dropdown__item--selected" : "cg-unified-dropdown__item"}
+                  onClick={() => {
+                    onChange(option.value);
+                    setQuery("");
+                    setOpen(false);
+                  }}
+                >
+                  <strong>{option.title}</strong>
+                  <span>{option.subtitle || option.value}</span>
+                </button>
+              ))
+            ) : (
+              <div className="cg-unified-dropdown__empty">No matches.</div>
+            )}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 
 
 export default function App() {
+  const [state, setState] = useState<AppState>(() => loadState());
   const [gitVersion, setGitVersion] = useState("Checking Git...");
   const [data, setData] = useState<GitStatusResponse | null>(null);
-  const [lastRefresh, setLastRefresh] = useState("");
-  const [message, setMessage] = useState("");
-  const [busyPath, setBusyPath] = useState("");
-  const [expandedPath, setExpandedPath] = useState("");
-  const [showPreflight, setShowPreflight] = useState(false);
-  const [commitMessage, setCommitMessage] = useState("");
-  const [commitPreflight, setCommitPreflight] = useState<CommitPreflight | null>(null);
-  const [historyRefreshTick, setHistoryRefreshTick] = useState(0);
-  const [repoPath, setRepoPath] = useState(() => localStorage.getItem("chronogit_repo_path") || "/home/dretski/projects/ChronoGit");
   const [repos, setRepos] = useState<RepoInfo[]>([]);
-  const [remoteStatus, setRemoteStatus] = useState<GitRemoteStatus | null>(null);
+  const [remote, setRemote] = useState<GitRemoteStatus | null>(null);
   const [operationState, setOperationState] = useState<GitOperationState | null>(null);
-  const [beginnerMode, setBeginnerMode] = useState(() => localStorage.getItem("chronogit_beginner_mode") !== "off");
-  const [llmEngine, setLlmEngine] = useState(() => localStorage.getItem("chronogit_llm_engine") || "ollama");
-  const [llmModel, setLlmModel] = useState(() => localStorage.getItem("chronogit_llm_model") || "qwen3:8b");
   const [localModels, setLocalModels] = useState<LocalModel[]>([]);
-  const [uiExplainTitle, setUiExplainTitle] = useState("");
-  const [uiExplainStatus, setUiExplainStatus] = useState("");
-  const [uiExplainText, setUiExplainText] = useState("");
-  const [uiExplainOpen, setUiExplainOpen] = useState(false);
-  const [uiExplainBusy, setUiExplainBusy] = useState(false);
+  const [llmEngine, setLlmEngine] = useState("ollama");
+  const [llmModel, setLlmModel] = useState("qwen3:8b");
+  const [message, setMessage] = useState("");
+  const [systemLog, setSystemLog] = useState<SystemLogEntry[]>([]);
+  const [llmLog, setLlmLog] = useState<LlmLogEntry[]>([]);
+  const [selectedPanelType, setSelectedPanelType] = useState<PanelType>("current-state");
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
   const [confirmText, setConfirmText] = useState("");
-  const [systemLog, setSystemLog] = useState<SystemLogEntry[]>(() => {
-    try {
-      return JSON.parse(localStorage.getItem("chronogit_system_log") || "[]");
-    } catch {
-      return [];
-    }
-  });
-  const [systemLogFilter, setSystemLogFilter] = useState<"all" | "info" | "action" | "warning" | "error">("all");
-  const [llmLog, setLlmLog] = useState<LlmLogEntry[]>(() => {
-    try {
-      return JSON.parse(localStorage.getItem("chronogit_llm_log") || "[]");
-    } catch {
-      return [];
-    }
-  });
-  const llmDockRef = useRef<HTMLElement | null>(null);
-  const [llmDockPulse, setLlmDockPulse] = useState(false);
-  const [lastAction, setLastAction] = useState("No file-changing action performed in this session.");
+  const [busyPath, setBusyPath] = useState("");
+  const [expandedPath, setExpandedPath] = useState("");
+  const [commitMessage, setCommitMessage] = useState("");
+  const [showPreflight, setShowPreflight] = useState(false);
+  const [commitPreflight, setCommitPreflight] = useState<CommitPreflight | null>(null);
   const [remotePreview, setRemotePreview] = useState<RemoteOperationPreview | null>(null);
-  const [armedRemoteUploadKey, setArmedRemoteUploadKey] = useState("");
   const [remoteBusy, setRemoteBusy] = useState("");
+  const [armedRemoteUploadKey, setArmedRemoteUploadKey] = useState("");
+  const [historyRefreshTick, setHistoryRefreshTick] = useState(0);
+  const [lastAction, setLastAction] = useState("No file-changing action performed in this session.");
+  const [uiExplainBusy] = useState(false);
   const autoRefreshBusyRef = useRef(false);
   const lastKnownStateSignatureRef = useRef("");
 
-  const [workspaceTabs, setWorkspaceTabs] = useState<WorkspaceTab[]>(() => {
-    try {
-      const parsed = JSON.parse(localStorage.getItem("chronogit_workspace_tabs") || "null");
-      return Array.isArray(parsed) && parsed.length ? parsed : createDefaultWorkspaceTabs();
-    } catch {
-      return createDefaultWorkspaceTabs();
-    }
-  });
-
-  const [activeWorkspaceTabId, setActiveWorkspaceTabId] = useState(() =>
-    localStorage.getItem("chronogit_active_workspace_tab") || "home"
+  const activeTab = useMemo(
+    () => state.tabs.find((tab) => tab.id === state.activeTabId) || state.tabs[0] || defaultState().tabs[0],
+    [state],
   );
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }, [state]);
+
+  useEffect(() => {
+    void initialLoad();
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setInterval(async () => {
+      if (autoRefreshBusyRef.current || busyPath || remoteBusy || confirmAction || showPreflight) return;
+      try {
+        autoRefreshBusyRef.current = true;
+        const [statusResult, remoteResult, operationResult] = await Promise.all([
+          invoke<GitStatusResponse>("git_status", { repoPath: state.repoPath }),
+          invoke<GitRemoteStatus>("git_remote_status", { repoPath: state.repoPath }),
+          invoke<GitOperationState>("git_operation_state", { repoPath: state.repoPath }),
+        ]);
+        const signature = JSON.stringify({ statusResult, remoteResult, operationResult });
+        if (lastKnownStateSignatureRef.current && signature !== lastKnownStateSignatureRef.current) {
+          setData(statusResult);
+          setRemote(remoteResult);
+          setOperationState(operationResult);
+          setHistoryRefreshTick((value) => value + 1);
+          appendSystemLog("info", "Auto-refresh detected repository changes.");
+        }
+        lastKnownStateSignatureRef.current = signature;
+      } catch (err) {
+        appendSystemLog("warning", `Auto-refresh skipped: ${err}`);
+      } finally {
+        autoRefreshBusyRef.current = false;
+      }
+    }, 2500);
+
+    return () => window.clearInterval(timer);
+  }, [state.repoPath, busyPath, remoteBusy, confirmAction, showPreflight]);
+
+  async function initialLoad() {
+    await Promise.allSettled([detectGit(), refresh(), loadRepos(), loadLocalModels()]);
+  }
+
+  function appendSystemLog(level: SystemLogEntry["level"], text: string) {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    setSystemLog((current) => {
+      if (current[0]?.message === trimmed) return current;
+      const now = new Date();
+      return [{
+        id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        date: now.toLocaleDateString(),
+        time: now.toLocaleTimeString(),
+        level,
+        message: trimmed,
+      }, ...current].slice(0, 120);
+    });
+  }
+
+  function appendLlmEntry(entry: Omit<LlmLogEntry, "id" | "timestamp">) {
+    if (!entry.content.trim()) return;
+    setLlmLog((current) => [{
+      id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      timestamp: new Date().toLocaleTimeString(),
+      collapsed: false,
+      streaming: false,
+      ...entry,
+    }, ...current].slice(0, 80));
+  }
+
+  function beginLlmEntry(entry: Omit<LlmLogEntry, "id" | "timestamp" | "content">) {
+    const id = `llm-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    setLlmLog((current) => [{
+      id,
+      timestamp: new Date().toLocaleTimeString(),
+      content: "",
+      collapsed: false,
+      streaming: true,
+      ...entry,
+    }, ...current].slice(0, 80));
+    return id;
+  }
+
+  function appendLlmChunk(id: string, chunk: string) {
+    if (!chunk) return;
+    setLlmLog((current) => current.map((entry) =>
+      entry.id === id ? { ...entry, content: `${entry.content}${chunk}` } : entry
+    ));
+  }
+
+  function finishLlmEntry(id: string, finalContent?: string) {
+    setLlmLog((current) => current.map((entry) =>
+      entry.id === id ? { ...entry, streaming: false, content: finalContent || entry.content } : entry
+    ));
+  }
+
+  function toggleLlmEntry(id: string) {
+    setLlmLog((current) => current.map((entry) =>
+      entry.id === id ? { ...entry, collapsed: !entry.collapsed } : entry
+    ));
+  }
+
+  async function streamLlmEntry(entry: Omit<LlmLogEntry, "id" | "timestamp" | "content">, prompt: string) {
+    if (!llmModel) {
+      setMessage("Local LLM unavailable: no model selected.");
+      return;
+    }
+
+    const streamId = beginLlmEntry({ ...entry, model: llmModel });
+
+    const unlisten = await listen<LlmStreamEvent>("chronogit://llm-stream", (event) => {
+      if (event.payload.stream_id !== streamId) return;
+      if (event.payload.error) {
+        appendLlmChunk(streamId, `\n[STREAM ERROR] ${event.payload.error}`);
+        finishLlmEntry(streamId);
+        return;
+      }
+      appendLlmChunk(streamId, event.payload.chunk);
+      if (event.payload.done) finishLlmEntry(streamId);
+    });
+
+    try {
+      const result = await invoke<ExplainDiffResult>("explain_prompt_with_ollama_stream", {
+        model: llmModel,
+        streamId,
+        title: entry.title,
+        prompt,
+      });
+      finishLlmEntry(streamId, result.explanation);
+      appendSystemLog("action", `Streamed local ${result.model} explanation: ${entry.title}`);
+    } catch (err) {
+      appendLlmChunk(streamId, `\n[ERROR] ${err}`);
+      finishLlmEntry(streamId);
+      appendSystemLog("error", `Local LLM streaming failed: ${err}`);
+    } finally {
+      unlisten();
+    }
+  }
+
+  async function detectGit() {
+    try {
+      setGitVersion(await invoke<string>("detect_git"));
+    } catch (err) {
+      setGitVersion(`Git error: ${err}`);
+    }
+  }
+
+  async function refresh(repoPath = state.repoPath) {
+    try {
+      const [statusResult, remoteResult, operationResult] = await Promise.all([
+        invoke<GitStatusResponse>("git_status", { repoPath }),
+        invoke<GitRemoteStatus>("git_remote_status", { repoPath }),
+        invoke<GitOperationState>("git_operation_state", { repoPath }),
+      ]);
+      setData(statusResult);
+      setRemote(remoteResult);
+      setOperationState(operationResult);
+      lastKnownStateSignatureRef.current = JSON.stringify({ statusResult, remoteResult, operationResult });
+      appendSystemLog("info", "Refreshed Git status.");
+      setHistoryRefreshTick((value) => value + 1);
+    } catch (err) {
+      setMessage(`Refresh failed: ${err}`);
+      appendSystemLog("error", `Refresh failed: ${err}`);
+    }
+  }
+
+  async function loadRepos() {
+    try {
+      setRepos(await invoke<RepoInfo[]>("discover_git_repos"));
+    } catch (err) {
+      setMessage(`Repository scan failed: ${err}`);
+      appendSystemLog("error", `Repository scan failed: ${err}`);
+    }
+  }
+
+  async function loadLocalModels(engine = llmEngine) {
+    try {
+      const models = await invoke<LocalModel[]>("list_local_llm_models", { engine });
+      setLocalModels(models);
+      if (models.length && !models.some((model) => model.name === llmModel)) {
+        setLlmModel(models[0].name);
+      }
+    } catch (err) {
+      setLocalModels([]);
+      appendSystemLog("warning", `Local LLM model discovery failed: ${err}`);
+    }
+  }
+
+  async function explainUiContext(context: ExplainContext) {
+    const prompt = `/no_think
+You are ChronoGit, a local-only Git learning assistant.
+Return ONLY the final explanation. Do not include thinking, prelude, self-talk, or reasoning narration.
+
+Explain this ChronoGit UI concept or action for a beginner, while keeping enough technical detail for an advanced developer.
+
+Use this exact format:
+
+Summary:
+- ...
+
+What it means:
+- ...
+
+Safe action guidance:
+- ...
+
+Risk notes:
+- ...
+
+Suggested review:
+- ...
+
+Hard rules:
+- Do not invent context beyond the supplied UI context and raw truth.
+- If something is not visible in the supplied context, say: not visible in this context.
+- ChronoGit is local-only. Do not claim cloud behavior unless explicitly visible.
+- Git truth and deterministic UI state are authoritative; the LLM explanation is advisory.
+
+Metadata:
+Kind: ${context.kind}
+Title: ${context.title}
+
+User-facing context:
+${context.plainText.slice(0, 8000)}
+
+Raw truth:
+${context.rawTruth.slice(0, 12000)}`;
+
+    await streamLlmEntry({
+      source: context.kind === "preflight" ? "preflight" : context.kind === "remote" ? "remote" : context.kind === "system_log" ? "system_log" : "ui",
+      model: llmModel,
+      title: context.title,
+      collapsed: false,
+      streaming: true,
+    }, prompt);
+  }
+
+  function setRepoPath(repoPath: string) {
+    setState((current) => ({ ...current, repoPath }));
+    void refresh(repoPath);
+  }
+
+  function updateActiveTab(mutator: (tab: WorkspaceTab) => WorkspaceTab) {
+    setState((current) => ({
+      ...current,
+      tabs: current.tabs.map((tab) => tab.id === current.activeTabId ? mutator(tab) : tab),
+    }));
+  }
+
+  function addTab() {
+    const id = `tab-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    setState((current) => ({
+      ...current,
+      activeTabId: id,
+      tabs: [...current.tabs, { id, name: `Tab ${current.tabs.length + 1}`, panels: [makePanel("current-state")] }],
+    }));
+  }
+
+  function renameTab(tabId: string) {
+    const current = state.tabs.find((tab) => tab.id === tabId);
+    const name = window.prompt("Rename tab:", current?.name || "Tab")?.trim();
+    if (!name) return;
+    setState((old) => ({ ...old, tabs: old.tabs.map((tab) => tab.id === tabId ? { ...tab, name } : tab) }));
+  }
+
+  function closeTab(tabId: string) {
+    setState((current) => {
+      if (current.tabs.length <= 1) return current;
+      const tabs = current.tabs.filter((tab) => tab.id !== tabId);
+      return { ...current, tabs, activeTabId: current.activeTabId === tabId ? tabs[0].id : current.activeTabId };
+    });
+  }
+
+  function addPanel(type: PanelType) {
+    updateActiveTab((tab) => ({ ...tab, panels: [...tab.panels, makePanel(type, tab.panels.length)] }));
+  }
+
+  function closePanel(panelId: string) {
+    updateActiveTab((tab) => ({
+      ...tab,
+      panels: tab.panels.length <= 1 ? tab.panels : tab.panels.filter((panel) => panel.id !== panelId),
+    }));
+  }
+
+  function movePanel(panelId: string, x: number, y: number) {
+    updateActiveTab((tab) => ({
+      ...tab,
+      panels: tab.panels.map((panel) =>
+        panel.id === panelId ? { ...panel, x: snap(Math.max(0, x)), y: snap(Math.max(0, y)) } : panel
+      ),
+    }));
+  }
+
+  function resizePanel(panelId: string, w: number, h: number) {
+    updateActiveTab((tab) => ({
+      ...tab,
+      panels: tab.panels.map((panel) =>
+        panel.id === panelId ? { ...panel, w: snap(Math.max(240, w)), h: snap(Math.max(140, h)) } : panel
+      ),
+    }));
+  }
+
+  function beginDrag(event: ReactPointerEvent, panel: PanelInstance) {
+    if ((event.target as HTMLElement).closest("button,input,.cg-panel__resize")) return;
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const originX = panel.x;
+    const originY = panel.y;
+
+    const onMove = (moveEvent: PointerEvent) => {
+      movePanel(panel.id, originX + moveEvent.clientX - startX, originY + moveEvent.clientY - startY);
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }
+
+  function beginResize(event: ReactPointerEvent, panel: PanelInstance) {
+    event.stopPropagation();
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const originW = panel.w;
+    const originH = panel.h;
+
+    const onMove = (moveEvent: PointerEvent) => {
+      resizePanel(panel.id, originW + moveEvent.clientX - startX, originH + moveEvent.clientY - startY);
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }
+
+  async function executeFileAction(action: "git_stage" | "git_unstage" | "git_restore" | "git_remove_untracked" | "git_ignore_path", path: string) {
+    try {
+      setBusyPath(path);
+      setMessage("");
+      const result = await invoke<string>(action, { repoPath: state.repoPath, path });
+      setMessage(result);
+      setLastAction(`${result}.`);
+      appendSystemLog("action", result);
+      await refresh();
+    } catch (err) {
+      setMessage(`Action failed: ${err}`);
+      appendSystemLog("error", `Action failed: ${err}`);
+    } finally {
+      setBusyPath("");
+    }
+  }
+
+  async function runFileAction(action: "git_stage" | "git_unstage" | "git_restore" | "git_remove_untracked" | "git_ignore_path", path: string) {
+    if (action === "git_restore" || action === "git_remove_untracked") {
+      setConfirmAction({
+        title: action === "git_restore" ? "Restore / discard local change" : "Remove untracked file",
+        body: action === "git_restore"
+          ? `This discards the local working-folder edit and restores the last committed version.\n\nPath:\n${path}`
+          : `This deletes an untracked file. Git cannot restore it from history.\n\nPath:\n${path}`,
+        confirmLabel: action === "git_restore" ? ui(state.beginnerMode, "Restore / discard", "git restore") : ui(state.beginnerMode, "Remove untracked file", "rm"),
+        danger: true,
+        action: async () => executeFileAction(action, path),
+      });
+      return;
+    }
+    await executeFileAction(action, path);
+  }
+
+  async function openSnapshotPreflight() {
+    try {
+      setMessage("");
+      const result = await invoke<CommitPreflight>("git_commit_preflight", { repoPath: state.repoPath });
+      setCommitPreflight(result);
+      setShowPreflight(true);
+    } catch (err) {
+      setMessage(`Preflight failed: ${err}`);
+      appendSystemLog("error", `Preflight failed: ${err}`);
+    }
+  }
+
+  async function confirmSnapshot() {
+    try {
+      const result = await invoke<CommitResult>("git_commit", { repoPath: state.repoPath, message: commitMessage });
+      setMessage(result.message);
+      setLastAction(`${result.message}. This snapshot is local until pushed.`);
+      appendSystemLog(result.ok ? "action" : "error", result.message);
+      setCommitMessage("");
+      setShowPreflight(false);
+      await refresh();
+    } catch (err) {
+      setMessage(`SNAPSHOT FAILED: ${err}`);
+      appendSystemLog("error", `SNAPSHOT FAILED: ${err}`);
+    }
+  }
 
   function remotePreviewKey(preview: RemoteOperationPreview) {
     return [
@@ -544,363 +1146,17 @@ export default function App() {
     return preview.operation === "upload_snapshots_preview" && armedRemoteUploadKey === remotePreviewKey(preview);
   }
 
-
-
-  function gitStateSignature(
-    status: GitStatusResponse,
-    remote: GitRemoteStatus | null,
-    operation: GitOperationState | null,
-  ) {
-    return JSON.stringify({
-      branch: status.branch,
-      staged: status.staged.map((file) => [
-        file.path,
-        file.index_status,
-        file.worktree_status,
-        file.status,
-        file.risk,
-        file.staged,
-      ]),
-      working: status.working.map((file) => [
-        file.path,
-        file.index_status,
-        file.worktree_status,
-        file.status,
-        file.risk,
-        file.staged,
-      ]),
-      remote: remote
-        ? {
-            branch: remote.branch,
-            upstream: remote.upstream,
-            ahead: remote.ahead,
-            behind: remote.behind,
-            has_remote: remote.has_remote,
-            is_diverged: remote.is_diverged,
-            is_clean: remote.is_clean,
-          }
-        : null,
-      operation: operation
-        ? {
-            rebase_in_progress: operation.rebase_in_progress,
-            merge_in_progress: operation.merge_in_progress,
-            cherry_pick_in_progress: operation.cherry_pick_in_progress,
-            revert_in_progress: operation.revert_in_progress,
-            conflicted_files: operation.conflicted_files,
-          }
-        : null,
-    });
-  }
-
-  function appendSystemLog(level: SystemLogEntry["level"], messageText: string) {
-    const trimmed = messageText.trim();
-    if (!trimmed) return;
-
-    const lower = trimmed.toLowerCase();
-    const isRefreshStart = lower === "refreshing chronogit state...";
-    const isRefreshComplete = lower === "chronogit state and time machine refreshed.";
-
-    // Do not spam the durable system log with transient refresh-start messages.
-    if (isRefreshStart) return;
-
-    setSystemLog((entries) => {
-      const recent = entries.slice(-8);
-
-      // Collapse repeated refresh-complete messages and exact repeated messages.
-      if (isRefreshComplete && recent.some((entry) => entry.message === trimmed)) {
-        return entries;
-      }
-
-      if (entries.length && entries[entries.length - 1].message === trimmed) {
-        return entries;
-      }
-
-      return [
-        ...entries.slice(-119),
-        (() => {
-          const now = new Date();
-
-          const date = now.toLocaleDateString(undefined, {
-            year: "numeric",
-            month: "2-digit",
-            day: "2-digit",
-          });
-
-          const time = now.toLocaleTimeString();
-
-          return {
-            id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-            date,
-            time,
-            level,
-            message: trimmed,
-          };
-        })(),
-      ];
-    });
-  }
-
-  function appendLlmEntry(entry: Omit<LlmLogEntry, "id" | "timestamp">) {
-    const content = entry.content.trim();
-    if (!content) return;
-
-    setLlmLog((entries) => [
-      ...entries.slice(-49),
-      {
-        id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-        timestamp: new Date().toLocaleTimeString(),
-        ...entry,
-        content,
-      },
-    ]);
-
-    window.setTimeout(() => {
-      llmDockRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-      setLlmDockPulse(true);
-      window.setTimeout(() => setLlmDockPulse(false), 1400);
-    }, 80);
-  }
-
-  function logLevelFromMessage(messageText: string): SystemLogEntry["level"] {
-    const lower = messageText.toLowerCase();
-
-    if (lower.includes("failed") || lower.includes("error") || lower.includes("blocked")) return "error";
-    if (lower.includes("warning") || lower.includes("danger") || lower.includes("risk")) return "warning";
-    if (lower.includes("created") || lower.includes("prepared") || lower.includes("removed") || lower.includes("restored") || lower.includes("fetched") || lower.includes("downloaded")) return "action";
-    return "info";
-  }
-
-  async function refresh(path = repoPath) {
-    const [statusResult, remoteResult, operationResult] = await Promise.all([
-      invoke<GitStatusResponse>("git_status", { repoPath: path }),
-      invoke<GitRemoteStatus>("git_remote_status", { repoPath: path }),
-      invoke<GitOperationState>("git_operation_state", { repoPath: path }),
-    ]);
-
-    setData(statusResult);
-    setRemoteStatus(remoteResult);
-    setOperationState(operationResult);
-    lastKnownStateSignatureRef.current = gitStateSignature(statusResult, remoteResult, operationResult);
-    setLastRefresh(new Date().toLocaleTimeString());
-  }
-
-  async function loadRepos() {
-    try {
-      const result = await invoke<RepoInfo[]>("discover_git_repos");
-      setRepos(result);
-
-      if (result.length > 0 && !result.some((repo) => repo.path === repoPath)) {
-        setRepoPath(result[0].path);
-        localStorage.setItem("chronogit_repo_path", result[0].path);
-      }
-    } catch (err) {
-      setMessage(`Repository discovery failed: ${err}`);
-    }
-  }
-
-  useEffect(() => {
-    invoke<string>("detect_git")
-      .then(setGitVersion)
-      .catch((err) => setGitVersion(`Git error: ${err}`));
-
-    refresh().catch((err) => setMessage(`Status error: ${err}`));
-    void loadRepos();
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem("chronogit_repo_path", repoPath);
-    refresh(repoPath).catch((err) => setMessage(`Status error: ${err}`));
-    setHistoryRefreshTick((value) => value + 1);
-  }, [repoPath]);
-
-  useEffect(() => {
-    localStorage.setItem("chronogit_llm_engine", llmEngine);
-    void loadLocalModels(llmEngine);
-  }, [llmEngine]);
-
-  useEffect(() => {
-    localStorage.setItem("chronogit_llm_model", llmModel);
-  }, [llmModel]);
-
-  useEffect(() => {
-    localStorage.setItem("chronogit_beginner_mode", beginnerMode ? "on" : "off");
-  }, [beginnerMode]);
-
-  useEffect(() => {
-    if (message.trim()) {
-      appendSystemLog(logLevelFromMessage(message), message);
-    }
-  }, [message]);
-
-
-  useEffect(() => {
-    localStorage.setItem("chronogit_system_log", JSON.stringify(systemLog));
-  }, [systemLog]);
-
-  useEffect(() => {
-    localStorage.setItem("chronogit_llm_log", JSON.stringify(llmLog));
-  }, [llmLog]);
-
-  useEffect(() => {
-    localStorage.setItem("chronogit_workspace_tabs", JSON.stringify(workspaceTabs));
-  }, [workspaceTabs]);
-
-  useEffect(() => {
-    localStorage.setItem("chronogit_active_workspace_tab", activeWorkspaceTabId);
-  }, [activeWorkspaceTabId]);
-
-
-  useEffect(() => {
-    const timer = window.setInterval(async () => {
-      if (autoRefreshBusyRef.current) return;
-      if (busyPath || remoteBusy || confirmAction || showPreflight) return;
-
-      try {
-        autoRefreshBusyRef.current = true;
-
-        const [statusResult, remoteResult, operationResult] = await Promise.all([
-          invoke<GitStatusResponse>("git_status", { repoPath }),
-          invoke<GitRemoteStatus>("git_remote_status", { repoPath }),
-          invoke<GitOperationState>("git_operation_state", { repoPath }),
-        ]);
-
-        const nextSignature = gitStateSignature(statusResult, remoteResult, operationResult);
-
-        if (!lastKnownStateSignatureRef.current) {
-          lastKnownStateSignatureRef.current = nextSignature;
-          return;
-        }
-
-        if (nextSignature !== lastKnownStateSignatureRef.current) {
-          lastKnownStateSignatureRef.current = nextSignature;
-          setData(statusResult);
-          setRemoteStatus(remoteResult);
-          setOperationState(operationResult);
-          setLastRefresh(new Date().toLocaleTimeString());
-          setHistoryRefreshTick((value) => value + 1);
-          appendSystemLog("info", "Auto-refresh detected repository changes.");
-        }
-      } catch (err) {
-        appendSystemLog("warning", `Auto-refresh skipped: ${err}`);
-      } finally {
-        autoRefreshBusyRef.current = false;
-      }
-    }, 2500);
-
-    return () => window.clearInterval(timer);
-  }, [repoPath, busyPath, remoteBusy, confirmAction, showPreflight]);
-
-
-  async function executeAction(action: "git_stage" | "git_unstage" | "git_restore" | "git_remove_untracked" | "git_ignore_path", path: string) {
-    try {
-      setBusyPath(path);
-      setMessage("");
-      const result = await invoke<string>(action, { repoPath, path });
-
-      if (action === "git_remove_untracked") {
-        setExpandedPath((value) =>
-          value.startsWith(`${path}:`) ? "" : value
-        );
-
-        setData((current) =>
-          current
-            ? {
-                ...current,
-                staged: current.staged.filter((file) => file.path !== path),
-                working: current.working.filter((file) => file.path !== path),
-              }
-            : current
-        );
-      }
-
-      setMessage(result);
-      setLastAction(`${result}. Recovery depends on the action: committed history can be inspected in Time Machine; uncommitted discarded/untracked deletions may need manual re-editing or external backups.`);
-      await refresh();
-    } catch (err) {
-      setMessage(`Action failed: ${err}`);
-    } finally {
-      setBusyPath("");
-    }
-  }
-
-  async function runAction(action: "git_stage" | "git_unstage" | "git_restore" | "git_remove_untracked" | "git_ignore_path", path: string) {
-    if (action === "git_restore") {
-      setConfirmAction({
-        title: "Restore / discard local change",
-        body: `ChronoGit will ask Git to restore this file from the last committed snapshot. This discards your local working-folder edit.\n\nPath:\n${path}`,
-        confirmLabel: "Restore / discard",
-        danger: true,
-        action: async () => executeAction(action, path),
-      });
-      return;
-    }
-
-    if (action === "git_remove_untracked") {
-      setConfirmAction({
-        title: "Remove untracked file",
-        body: `This file is not in Git history. Removing it deletes it from the working folder.\n\nPath:\n${path}`,
-        confirmLabel: "Remove file",
-        danger: true,
-        action: async () => executeAction(action, path),
-      });
-      return;
-    }
-
-    if (action === "git_ignore_path") {
-      setConfirmAction({
-        title: "Add path to .gitignore",
-        body: `ChronoGit will add this path to .gitignore so Git stops showing it as an untracked file.\n\nPath:\n${path}`,
-        confirmLabel: "Add to .gitignore",
-        danger: false,
-        action: async () => executeAction(action, path),
-      });
-      return;
-    }
-
-    await executeAction(action, path);
-  }
-
-  async function openSnapshotPreflight() {
-    try {
-      setMessage("");
-      const result = await invoke<CommitPreflight>("git_commit_preflight", { repoPath });
-      setCommitPreflight(result);
-      setShowPreflight(true);
-    } catch (err) {
-      setMessage(`Preflight failed: ${err}`);
-    }
-  }
-
-  async function confirmSnapshot() {
-    try {
-      setMessage("");
-      const result = await invoke<CommitResult>("git_commit", {
-        repoPath,
-        message: commitMessage,
-      });
-
-      setMessage(result.message);
-      setLastAction(`${result.message}. This snapshot is now visible in local Time Machine history. It is not uploaded unless you push separately.`);
-      setCommitMessage("");
-      setShowPreflight(false);
-      await refresh();
-      setHistoryRefreshTick((value) => value + 1);
-    } catch (err) {
-      setMessage(`SNAPSHOT FAILED: ${err}`);
-    }
-  }
-
-
   async function fetchRemoteKnowledge() {
     try {
       setRemoteBusy("fetch");
-      setMessage("");
-      const result = await invoke<string>("git_fetch_remote", { repoPath });
+      const result = await invoke<string>("git_fetch_remote", { repoPath: state.repoPath });
       setMessage(result);
-      setLastAction(`${result} This updated remote-tracking knowledge only; it did not change working files.`);
+      setLastAction(`${result} This updated remote-tracking knowledge only.`);
+      appendSystemLog("action", result);
       await refresh();
     } catch (err) {
       setMessage(`Fetch remote knowledge failed: ${err}`);
+      appendSystemLog("error", `Fetch remote knowledge failed: ${err}`);
     } finally {
       setRemoteBusy("");
     }
@@ -909,39 +1165,33 @@ export default function App() {
   async function loadRemotePreview(kind: "push" | "pull") {
     try {
       setRemoteBusy(kind);
-      setMessage("");
       const command = kind === "push" ? "git_push_preview" : "git_pull_preview";
-      const result = await invoke<RemoteOperationPreview>(command, { repoPath });
+      const result = await invoke<RemoteOperationPreview>(command, { repoPath: state.repoPath });
       setRemotePreview(result);
       setArmedRemoteUploadKey("");
+      appendSystemLog("info", `${kind === "push" ? "Upload" : "Download"} preview loaded.`);
     } catch (err) {
       setRemotePreview(null);
       setMessage(`${kind === "push" ? "Upload" : "Download"} preview failed: ${err}`);
+      appendSystemLog("error", `${kind === "push" ? "Upload" : "Download"} preview failed: ${err}`);
     } finally {
       setRemoteBusy("");
     }
   }
 
-
-
   async function executePush(preview: RemoteOperationPreview) {
     try {
       setRemoteBusy("push_execute");
-      setMessage("Running git push...");
-      const result = await invoke<RemotePushResult>("git_push_execute", {
-        repoPath,
-        overrideToken: guardedRemoteToken(preview),
-      });
-
+      const result = await invoke<RemotePushResult>("git_push_execute", { repoPath: state.repoPath, overrideToken: guardedRemoteToken(preview) });
       setRemotePreview(null);
       setArmedRemoteUploadKey("");
-      setMessage(`${result.message}${result.stdout ? ` stdout: ${result.stdout}` : ""}${result.stderr ? ` stderr: ${result.stderr}` : ""}`);
-      setLastAction(`${result.message} This shared local snapshots with the configured remote; inspect Remote state after refresh.`);
+      setMessage(`${result.message}${result.stderr ? ` stderr: ${result.stderr}` : ""}`);
+      setLastAction(result.message);
+      appendSystemLog(result.ok ? "action" : "error", result.message);
       await refresh();
-      setHistoryRefreshTick((value) => value + 1);
     } catch (err) {
       setMessage(`Upload snapshots failed: ${err}`);
-      setLastAction("Upload snapshots failed. ChronoGit did not force push. Fetch remote knowledge and preview again before choosing another action.");
+      appendSystemLog("error", `Upload snapshots failed: ${err}`);
     } finally {
       setRemoteBusy("");
     }
@@ -950,20 +1200,15 @@ export default function App() {
   async function executePullRebase(preview: RemoteOperationPreview) {
     try {
       setRemoteBusy("pull_execute");
-      setMessage("Running git pull --rebase --autostash...");
-      const result = await invoke<RemotePullResult>("git_pull_rebase_execute", {
-        repoPath,
-        overrideToken: guardedRemoteToken(preview),
-      });
-
+      const result = await invoke<RemotePullResult>("git_pull_rebase_execute", { repoPath: state.repoPath, overrideToken: guardedRemoteToken(preview) });
       setRemotePreview(null);
-      setMessage(`${result.message}${result.stdout ? ` stdout: ${result.stdout}` : ""}${result.stderr ? ` stderr: ${result.stderr}` : ""}`);
-      setLastAction(`${result.message} This may have changed local files/history; inspect Working, Prepared, and Time Machine before continuing.`);
+      setMessage(`${result.message}${result.stderr ? ` stderr: ${result.stderr}` : ""}`);
+      setLastAction(result.message);
+      appendSystemLog(result.ok ? "action" : "error", result.message);
       await refresh();
-      setHistoryRefreshTick((value) => value + 1);
     } catch (err) {
       setMessage(`Download updates failed: ${err}`);
-      setLastAction("Download updates failed. If a rebase is in progress, use Abort rebase before trying another strategy.");
+      appendSystemLog("error", `Download updates failed: ${err}`);
     } finally {
       setRemoteBusy("");
     }
@@ -972,181 +1217,25 @@ export default function App() {
   async function abortRebase() {
     try {
       setRemoteBusy("abort_rebase");
-      const result = await invoke<string>("git_rebase_abort", { repoPath });
+      const result = await invoke<string>("git_rebase_abort", { repoPath: state.repoPath });
       setRemotePreview(null);
       setArmedRemoteUploadKey("");
       setMessage(result);
       setLastAction(result);
+      appendSystemLog("action", result);
       await refresh();
-      setHistoryRefreshTick((value) => value + 1);
     } catch (err) {
       setMessage(`Abort rebase failed: ${err}`);
+      appendSystemLog("error", `Abort rebase failed: ${err}`);
     } finally {
       setRemoteBusy("");
     }
   }
 
-  async function refreshAppState() {
-    try {
-      setMessage("Refreshing ChronoGit state...");
-      await refresh();
-      setHistoryRefreshTick((value) => value + 1);
-      setMessage("ChronoGit state and Time Machine refreshed.");
-    } catch (err) {
-      setMessage(`Refresh failed: ${err}`);
-    }
-  }
-
-  async function loadLocalModels(engine = llmEngine) {
-    try {
-      const models = await invoke<LocalModel[]>("list_local_llm_models", { engine });
-      setLocalModels(models);
-
-      if (models.length > 0 && !models.some((model) => model.name === llmModel)) {
-        setLlmModel(models[0].name);
-        localStorage.setItem("chronogit_llm_model", models[0].name);
-      }
-    } catch (err) {
-      setLocalModels([]);
-      setMessage(`Local LLM model discovery failed: ${err}`);
-    }
-  }
-
-  async function explainUiContext(context: ExplainContext) {
-    if (!llmModel) {
-      setMessage("Local LLM unavailable: no model selected.");
-      return;
-    }
-
-    try {
-      setUiExplainBusy(true);
-      setUiExplainTitle(context.title);
-      setUiExplainOpen(true);
-      setUiExplainStatus(`Local ${llmModel} is explaining: ${context.title}`);
-      setUiExplainText("Waiting for local LLM explanation...");
-
-      const result = await invoke<ExplainDiffResult>("explain_context_with_ollama", {
-        model: llmModel,
-        kind: context.kind,
-        title: context.title,
-        plainText: context.plainText,
-        rawTruth: context.rawTruth,
-      });
-
-      setUiExplainStatus(`Local ${result.model} finished. GPU TDP: ${result.tdp_before_watts}W → ${result.tdp_active_watts}W → ${result.tdp_reset_watts}W.`);
-      setUiExplainText(result.explanation || "Local LLM returned an empty explanation.");
-      appendLlmEntry({
-        source: context.kind === "preflight" ? "preflight" : context.kind === "remote" ? "remote" : "ui",
-        model: result.model,
-        title: context.title,
-        content: result.explanation || "Local LLM returned an empty explanation.",
-      });
-      setUiExplainOpen(false);
-    } catch (err) {
-      setUiExplainStatus(`Local LLM explanation failed: ${err}`);
-      setUiExplainText("");
-    } finally {
-      setUiExplainBusy(false);
-    }
-  }
-
-
-  function addWorkspaceTab() {
-    const name = window.prompt("New ChronoGit tab name:", "New Tab")?.trim();
-    if (!name) return;
-
-    const id = `tab-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    setWorkspaceTabs((tabs) => [
-      ...tabs,
-      {
-        id,
-        name,
-        panels: [{ id: `${id}-empty`, type: "empty", size: "full" }],
-      },
-    ]);
-    setActiveWorkspaceTabId(id);
-  }
-
-  function renameWorkspaceTab(tabId: string) {
-    const current = workspaceTabs.find((tab) => tab.id === tabId);
-    if (!current) return;
-
-    const name = window.prompt("Rename ChronoGit tab:", current.name)?.trim();
-    if (!name) return;
-
-    setWorkspaceTabs((tabs) =>
-      tabs.map((tab) => tab.id === tabId ? { ...tab, name } : tab)
-    );
-  }
-
-  function closeWorkspaceTab(tabId: string) {
-    setWorkspaceTabs((tabs) => {
-      if (tabs.length <= 1) return tabs;
-
-      const next = tabs.filter((tab) => tab.id !== tabId);
-      if (activeWorkspaceTabId === tabId) {
-        setActiveWorkspaceTabId(next[0]?.id || "home");
-      }
-      return next;
-    });
-  }
-
-  function operationStateLabel(state: GitOperationState | null) {
-    if (!state) return "UNKNOWN";
-    if (state.conflicted_files.length > 0) return "CONFLICTS";
-    if (state.rebase_in_progress) return "REBASE IN PROGRESS";
-    if (state.merge_in_progress) return "MERGE IN PROGRESS";
-    if (state.cherry_pick_in_progress) return "CHERRY-PICK IN PROGRESS";
-    if (state.revert_in_progress) return "REVERT IN PROGRESS";
-    return "CLEAR";
-  }
-
-  function operationStateClass(state: GitOperationState | null) {
-    return operationStateLabel(state).toLowerCase().replace(/ /g, "-");
-  }
-
-  function hasInterruptedOperation(state: GitOperationState | null) {
-    if (!state) return false;
-    return (
-      state.rebase_in_progress ||
-      state.merge_in_progress ||
-      state.cherry_pick_in_progress ||
-      state.revert_in_progress ||
-      state.conflicted_files.length > 0
-    );
-  }
-
-  function beginnerTitle(text: string) {
-    return beginnerMode ? text : undefined;
-  }
-
-  function ActionExplainButton({
-    title,
-    plainText,
-  }: {
-    title: string;
-    plainText: string;
-    rawTruth?: string;
-    kind?: string;
-  }) {
-    if (!beginnerMode) return null;
-
-    return (
-      <span
-        className="explain-action-button"
-        title={`${title}\n\n${plainText}`}
-        aria-label={title}
-      >
-        ?
-      </span>
-    );
-  }
-
-  function renderCard(change: FileChange) {
+  function renderChangeCard(change: FileChange) {
     const expanded = expandedPath === `${change.path}:${change.staged}`;
-
     return (
-      <article className={`change-card change-card--${change.risk}`} key={`${change.path}-${change.index_status}-${change.worktree_status}-${change.staged}`}>
+      <article className={`change-card change-card--${change.risk}`} key={`${change.path}-${change.status}-${change.staged}`}>
         <div className="change-card__top">
           <div>
             <div className="change-card__path">{change.path}</div>
@@ -1154,98 +1243,47 @@ export default function App() {
           </div>
           <div className={`risk-pill risk-pill--${change.risk}`}>{change.risk}</div>
         </div>
-
         <div className="change-card__explain">{change.explanation}</div>
-
-        <div className="change-card__meta">
-          <span>
-            Git index/worktree: {change.index_status === " " ? "·" : change.index_status}
-            {change.worktree_status === " " ? "·" : change.worktree_status}
-          </span>
-          <span>{change.staged ? "Prepared for next commit" : "Still only in working folder"}</span>
-        </div>
-
         {expanded ? (
           <div className="explain-box">
-            <div className="explain-box__title">What does this mean?</div>
-            {explainEntry(change).map((line, index) => <p key={index}>{line}</p>)}
+            <strong>{ui(state.beginnerMode, "What this means", "git status interpretation")}</strong>
+            <p>{plainStatus(change)}. Risk: {change.risk}. Git index/worktree: {change.index_status || "·"}{change.worktree_status || "·"}.</p>
           </div>
         ) : null}
-
         <div className="change-card__actions">
           <button onClick={() => setExpandedPath(expanded ? "" : `${change.path}:${change.staged}`)}>
-            {expanded ? "Hide explanation" : "Explain"}
+            {ui(state.beginnerMode, expanded ? "Hide explanation" : "Explain", expanded ? "hide" : "explain")}
           </button>
-
-          <button
-            disabled={uiExplainBusy || !llmModel}
-            onClick={() => explainUiContext({
-              kind: "file_status",
-              title: `Explain file state: ${change.path}`,
-              plainText: `${plainStatus(change)}. Risk: ${change.risk}. ${change.explanation}`,
-              rawTruth: JSON.stringify(change, null, 2),
-            })}
-          >
-            Ask LLM
+          <button disabled={uiExplainBusy || !llmModel} onClick={() => explainUiContext({
+            kind: "file_status",
+            title: `Explain file state: ${change.path}`,
+            plainText: `${plainStatus(change)}. Risk: ${change.risk}. ${change.explanation}`,
+            rawTruth: JSON.stringify(change, null, 2),
+          })}>
+            {ui(state.beginnerMode, "Ask LLM", "explain_context")}
           </button>
-
           {!change.staged ? (
-            <>
-              <button title={beginnerTitle("Prepare for commit\n\nMarks this file for the next snapshot. It does not commit yet.")} disabled={busyPath === change.path} onClick={() => runAction("git_stage", change.path)}>
-                Prepare for commit
-              </button>
-              <ActionExplainButton
-                title="Explain Prepare for commit"
-                plainText="Prepare for commit means stage this file so it will be included in the next Git snapshot."
-                rawTruth={JSON.stringify(change, null, 2)}
-              />
-            </>
+            <button disabled={busyPath === change.path} onClick={() => runFileAction("git_stage", change.path)}>
+              {ui(state.beginnerMode, "Prepare for commit", "git add")}
+            </button>
           ) : (
-            <>
-              <button title={beginnerTitle("Remove from next commit\n\nTakes this file out of the next snapshot. Your file stays changed in the working folder.")} disabled={busyPath === change.path} onClick={() => runAction("git_unstage", change.path)}>
-                Remove from next commit
-              </button>
-              <ActionExplainButton
-                title="Explain Remove from next commit"
-                plainText="Remove from next commit means unstage this file. It stays in the working folder, but will not be included if you commit now."
-                rawTruth={JSON.stringify(change, null, 2)}
-              />
-            </>
+            <button disabled={busyPath === change.path} onClick={() => runFileAction("git_unstage", change.path)}>
+              {ui(state.beginnerMode, "Remove from next commit", "git reset")}
+            </button>
           )}
-
           {!change.staged && change.status !== "untracked" ? (
-            <>
-              <button className="danger-button" title={beginnerTitle("Restore / discard\n\nDestructive: throws away this file's local working-folder changes and returns it to the last committed version.")} disabled={busyPath === change.path} onClick={() => runAction("git_restore", change.path)}>
-                Restore / discard
-              </button>
-              <ActionExplainButton
-                title="Explain Restore / discard"
-                plainText="Restore / discard throws away this file's local working-folder changes and returns it to the last committed version."
-                rawTruth={JSON.stringify(change, null, 2)}
-                kind="destructive_button"
-              />
-            </>
+            <button className="danger-button" disabled={busyPath === change.path} onClick={() => runFileAction("git_restore", change.path)}>
+              {ui(state.beginnerMode, "Restore / discard", "git restore")}
+            </button>
           ) : null}
-
           {!change.staged && change.status === "untracked" ? (
             <>
-              <button className="danger-button" title={beginnerTitle("Remove untracked file\n\nDestructive: deletes a file Git does not track. Git cannot restore it from history.")} disabled={busyPath === change.path} onClick={() => runAction("git_remove_untracked", change.path)}>
-                Remove untracked file
+              <button className="danger-button" disabled={busyPath === change.path} onClick={() => runFileAction("git_remove_untracked", change.path)}>
+                {ui(state.beginnerMode, "Remove untracked file", "rm")}
               </button>
-              <ActionExplainButton
-                title="Explain Remove untracked file"
-                plainText="Remove untracked file deletes a file that is not in Git history. This is destructive because Git cannot restore it from a previous commit."
-                rawTruth={JSON.stringify(change, null, 2)}
-                kind="destructive_button"
-              />
-              <button title={beginnerTitle("Add to .gitignore\n\nKeeps the file on disk but tells Git to stop showing it as untracked.")} disabled={busyPath === change.path} onClick={() => runAction("git_ignore_path", change.path)}>
-                Add to .gitignore
+              <button disabled={busyPath === change.path} onClick={() => runFileAction("git_ignore_path", change.path)}>
+                {ui(state.beginnerMode, "Add to .gitignore", "append .gitignore")}
               </button>
-              <ActionExplainButton
-                title="Explain Add to .gitignore"
-                plainText="Add to .gitignore tells Git to stop showing this untracked path in normal status output."
-                rawTruth={JSON.stringify(change, null, 2)}
-              />
             </>
           ) : null}
         </div>
@@ -1253,760 +1291,345 @@ export default function App() {
     );
   }
 
-  function renderGrouped(items: FileChange[]) {
+  function renderGroupedChanges(items: FileChange[]) {
     const grouped = group(items);
     return ["critical", "danger", "evidence", "review", "normal"].map((risk) => {
       const rows = grouped[risk];
       if (!rows.length) return null;
-
       return (
         <section className="risk-section" key={risk}>
           <h3>{riskTitle(risk)} <span>{rows.length}</span></h3>
-          {rows.map(renderCard)}
+          {rows.map(renderChangeCard)}
         </section>
       );
     });
   }
 
-  if (!data) return <main className="app-shell">Loading ChronoGit...</main>;
+  function renderPanel(panel: PanelInstance) {
+    if (panel.type === "current-state") {
+      return (
+        <div className="cg-panel-content">
+          <h3>{remoteLabel(remote)}</h3>
+          <p>{remoteHuman(remote)}</p>
+          <p><strong>{ui(state.beginnerMode, "Branch", "HEAD branch")}:</strong> {data?.branch || "unknown"}</p>
+          <p><strong>{ui(state.beginnerMode, "Last action", "last mutation")}:</strong> {lastAction}</p>
+          <p><strong>{ui(state.beginnerMode, "Message", "last message")}:</strong> {message || "No message yet."}</p>
+        </div>
+      );
+    }
 
-  const totalChanges = data.staged.length + data.working.length;
-  const preflightWarnings = data.staged.filter((file) =>
-    file.risk === "danger" || file.risk === "critical" || file.risk === "evidence"
-  );
-  const hasCritical = data.staged.some((file) => file.risk === "critical");
-  const selectedModel = localModels.find((model) => model.name === llmModel);
+    if (panel.type === "remote-status") {
+      return (
+        <div className="cg-panel-content">
+          <h3>{remoteLabel(remote)}</h3>
+          <p><strong>Branch:</strong> {remote?.branch || data?.branch || "unknown"}</p>
+          <p><strong>Upstream:</strong> {remote?.upstream || "none"}</p>
+          <p><strong>Ahead / behind:</strong> +{remote?.ahead ?? 0} / -{remote?.behind ?? 0}</p>
+          <code>{remote?.remote_url || "No remote URL detected"}</code>
+        </div>
+      );
+    }
+
+    if (panel.type === "commit-preflight") {
+      const stagedCount = data?.staged.length ?? 0;
+      const workingCount = data?.working.length ?? 0;
+      const totalCount = stagedCount + workingCount;
+      const riskyPrepared = data?.staged.filter((file) => ["critical", "danger", "evidence"].includes(file.risk)) || [];
+
+      return (
+        <div className="cg-panel-content cg-preflight-panel">
+          <section className="cg-surface-card cg-surface-card--hero">
+            <div>
+              <div className="cg-eyebrow">{ui(state.beginnerMode, "Commit boundary", "index boundary")}</div>
+              <h3>{ui(state.beginnerMode, "Next snapshot contains", "git diff --cached --stat")}</h3>
+              <p>
+                {ui(
+                  state.beginnerMode,
+                  "Only prepared files are included. Working-folder changes stay outside this snapshot.",
+                  "Only index/staged paths are committed. Worktree paths are excluded.",
+                )}
+              </p>
+            </div>
+
+            <div className="cg-action-row">
+              <button disabled={uiExplainBusy || !llmModel} onClick={() => explainUiContext({
+                kind: "preflight",
+                title: "Explain Snapshot Preflight",
+                plainText: "Snapshot Preflight reviews only files prepared for the next commit.",
+                rawTruth: JSON.stringify({ staged: data?.staged || [], working: data?.working || [] }, null, 2),
+              })}>
+                {ui(state.beginnerMode, "Ask LLM", "explain_context")}
+              </button>
+              <button className="confirm" disabled={!stagedCount} onClick={openSnapshotPreflight}>
+                {ui(state.beginnerMode, `Review snapshot / Git commit (${stagedCount})`, "git commit")}
+              </button>
+            </div>
+          </section>
+
+          <section className="cg-metric-grid">
+            <div className="cg-metric-card">
+              <strong>{stagedCount}</strong>
+              <span>{ui(state.beginnerMode, "prepared files", "staged files")}</span>
+            </div>
+            <div className="cg-metric-card">
+              <strong>{workingCount}</strong>
+              <span>{ui(state.beginnerMode, "excluded working changes", "worktree excluded")}</span>
+            </div>
+            <div className="cg-metric-card">
+              <strong>{riskyPrepared.length}</strong>
+              <span>{ui(state.beginnerMode, "prepared warnings", "risk flags")}</span>
+            </div>
+            <div className="cg-metric-card">
+              <strong>{totalCount}</strong>
+              <span>{ui(state.beginnerMode, "visible changes", "status entries")}</span>
+            </div>
+          </section>
+
+          <section className={riskyPrepared.length ? "cg-status-callout cg-status-callout--warning" : "cg-status-callout cg-status-callout--ok"}>
+            <strong>
+              {riskyPrepared.length
+                ? ui(state.beginnerMode, "Review prepared warnings before committing", "risk flags in index")
+                : ui(state.beginnerMode, "No dangerous prepared files detected", "index risk clean")}
+            </strong>
+            <span>
+              {riskyPrepared.length
+                ? riskyPrepared.map((file) => `${file.risk}: ${file.path}`).join(" · ")
+                : snapshotRemoteSentence(remote)}
+            </span>
+          </section>
+        </div>
+      );
+    }
+
+    if (panel.type === "change-lists") {
+      return (
+        <div className="cg-panel-content cg-change-lists">
+          <div>
+            <h3>{ui(state.beginnerMode, "Prepared for next commit", "index / staged")}</h3>
+            {data?.staged.length ? renderGroupedChanges(data.staged) : <p>Nothing prepared.</p>}
+          </div>
+          <div>
+            <h3>{ui(state.beginnerMode, "Working folder changes", "worktree")}</h3>
+            {data?.working.length ? renderGroupedChanges(data.working) : <p>Working folder clean.</p>}
+          </div>
+        </div>
+      );
+    }
+
+    if (panel.type === "remote-actions") {
+      return (
+        <RemoteActionsPanel
+          beginnerMode={state.beginnerMode}
+          remoteBusy={remoteBusy}
+          remotePreview={remotePreview}
+          fetchRemoteKnowledge={fetchRemoteKnowledge}
+          loadRemotePreview={loadRemotePreview}
+          abortRebase={abortRebase}
+          isUploadPreviewArmed={isUploadPreviewArmed}
+          setConfirmAction={setConfirmAction}
+          setConfirmText={setConfirmText}
+          setArmedRemoteUploadKey={setArmedRemoteUploadKey}
+          setLastAction={setLastAction}
+          setMessage={setMessage}
+          executePush={executePush}
+          executePullRebase={executePullRebase}
+          explainUiContext={explainUiContext}
+          uiExplainBusy={uiExplainBusy}
+          llmModel={llmModel}
+        />
+      );
+    }
+
+    if (panel.type === "time-machine") {
+      return (
+        <TimeMachinePanel
+          repoPath={state.repoPath}
+          refreshTick={historyRefreshTick}
+          beginnerMode={state.beginnerMode}
+          llmModel={llmModel}
+          appendLlmEntry={appendLlmEntry}
+          setConfirmAction={setConfirmAction}
+        />
+      );
+    }
+
+    if (panel.type === "local-llm") {
+      const selectedModel = localModels.find((model) => model.name === llmModel);
+      const modelOptions = localModels.length
+        ? localModels.map((model) => ({
+            value: model.name,
+            title: model.name,
+            subtitle: `${model.parameter_size} · ${model.quantization_level} · ${model.family}`,
+          }))
+        : [{ value: llmModel, title: llmModel || "No models discovered", subtitle: "Run scan to refresh local model truth." }];
+
+      return (
+        <div className="cg-panel-content cg-local-llm-panel">
+          <label>Engine</label>
+          <ChronoDropdown
+            value={llmEngine}
+            options={[{ value: "ollama", title: "Ollama", subtitle: "Local Ollama model registry" }]}
+            onChange={setLlmEngine}
+            label={state.beginnerMode ? "LLM engine" : "engine"}
+            placeholder="Search engines..."
+            className="cg-local-llm-panel__dropdown"
+          />
+
+          <label>Model</label>
+          <ChronoDropdown
+            value={llmModel}
+            options={modelOptions}
+            onChange={setLlmModel}
+            label={state.beginnerMode ? "Local model" : "model"}
+            placeholder="Search local models..."
+            className="cg-local-llm-panel__dropdown"
+          />
+
+          <button onClick={() => loadLocalModels()}>{ui(state.beginnerMode, "Scan installed models", "ollama list")}</button>
+          <p>{selectedModel ? `${selectedModel.family} · ${selectedModel.parameter_size} · ${selectedModel.quantization_level} · ${(selectedModel.size / 1024 / 1024 / 1024).toFixed(1)} GB` : "Model metadata unavailable"}</p>
+        </div>
+      );
+    }
+
+    if (panel.type === "system-log") {
+      return (
+        <div className="cg-panel-content">
+          {systemLog.length ? systemLog.map((entry) => (
+            <article className={`system-log-entry system-log-entry--${entry.level}`} key={entry.id}>
+              <strong>{entry.level}</strong>
+              <span>{entry.date} {entry.time}</span>
+              <p>{entry.message}</p>
+              <button onClick={() => navigator.clipboard.writeText(entry.message)}>{ui(state.beginnerMode, "Copy", "clipboard.writeText")}</button>
+            </article>
+          )) : <p>No system log events yet.</p>}
+        </div>
+      );
+    }
+
+    if (panel.type === "llm-log") {
+      return (
+        <div className="cg-panel-content cg-llm-log-panel">
+          {llmLog.length ? llmLog.map((entry) => (
+            <article className={`llm-log-entry ${entry.streaming ? "llm-log-entry--streaming" : ""}`} key={entry.id}>
+              <button className="llm-log-entry__header" onClick={() => toggleLlmEntry(entry.id)}>
+                <span>{entry.collapsed ? "▶" : "▼"}</span>
+                <strong>{entry.title}</strong>
+                <em>{entry.streaming ? "streaming" : entry.timestamp}</em>
+              </button>
+              <div className="llm-log-entry__meta"><span>{entry.timestamp}</span><strong>{entry.source}</strong><code>{entry.model}</code></div>
+              {!entry.collapsed ? <pre>{entry.content || "Waiting for local LLM output..."}</pre> : null}
+              <button onClick={() => navigator.clipboard.writeText(entry.content)}>{ui(state.beginnerMode, "Copy message", "clipboard.writeText")}</button>
+            </article>
+          )) : <p>No LLM responses yet.</p>}
+        </div>
+      );
+    }
+
+    if (panel.type === "repository" || panel.type === "git-status") {
+      return <div className="cg-panel-content"><p>This truth now lives in the title bar.</p></div>;
+    }
+
+    if (panel.type === "notes") return <div className="cg-panel-content"><textarea className="cg-notes" placeholder="Operator notes..." /></div>;
+    return <div className="cg-panel-content"><p>Empty panel.</p></div>;
+  }
+
+  const preflightWarnings = data?.staged.filter((file) => ["danger", "critical", "evidence"].includes(file.risk)) || [];
+  const hasCritical = data?.staged.some((file) => file.risk === "critical") || false;
   const snapshotImpact = classifySnapshotImpact(commitPreflight);
-  const visibleSystemLog = systemLogFilter === "all"
-    ? systemLog
-    : systemLog.filter((entry) => entry.level === systemLogFilter);
-
-  const activeWorkspaceTab =
-    workspaceTabs.find((tab) => tab.id === activeWorkspaceTabId) ||
-    workspaceTabs[0] ||
-    createDefaultWorkspaceTabs()[0];
 
   return (
     <main className="app-shell">
-      <ChronoGitShell
-        tabs={workspaceTabs}
-        activeTabId={activeWorkspaceTab.id}
-        onSelectTab={setActiveWorkspaceTabId}
-        onAddTab={addWorkspaceTab}
-        onRenameTab={renameWorkspaceTab}
-        onCloseTab={closeWorkspaceTab}
-        beginnerMode={beginnerMode}
-        onToggleBeginnerMode={() => setBeginnerMode((value) => !value)}
-        repoPath={repoPath}
-        repos={repos}
-        onRepoChange={setRepoPath}
-        onScanRepos={loadRepos}
-        gitVersion={gitVersion}
-        branch={data.branch}
-        remoteLabel={remoteStateLabel(remoteStatus)}
-        lastRefresh={lastRefresh}
-        onRefresh={refreshAppState}
-      />
-
-      <WorkspaceCanvas activeTab={activeWorkspaceTab}>
-      <header className="hero hero--compact">
-        <div className="product-title-card">
-          <button
-            className="brand-link-button brand-link-button--logo"
-            title="Open Jarri website in your default browser"
-            onClick={async () => {
-              const result = await invoke<string>("open_external_url", { url: "http://jarri.systems" });
-              setMessage(result);
-            }}
-          >
-            <img src={jarriLogo} alt="Jarri" className="jarri-logo jarri-logo--large" />
-          </button>
-
-          <div className="product-title-text">
+      <div className="chronogit-titlebar">
+        <div className="chronogit-titlebar__brand">
+          <img src={jarriLogo} alt="Jarri" className="chronogit-titlebar__logo" />
+          <div>
             <h1>ChronoGit</h1>
-
-            <button
-              className="github-link"
-              title="Open GitHub profile in your default browser"
-              onClick={async () => {
-                const result = await invoke<string>("open_external_url", { url: "https://github.com/TorMatzAndren" });
-                setMessage(result);
-              }}
-            >
-              GitHub ↗
-            </button>
+            <p>Git is truth · panels are projections.</p>
           </div>
         </div>
 
-        <div className="hero-side">
-          <div className="beginner-main-card">
-            <div className="beginner-main-card__title">Mode</div>
-            <button
-              className={`beginner-toggle ${beginnerMode ? "beginner-toggle--on" : "beginner-toggle--off"}`}
-              onClick={() => setBeginnerMode((value) => !value)}
-            >
-              Beginner mode: {beginnerMode ? "ON" : "OFF"}
-            </button>
-            <div className="beginner-main-card__note">
-              {beginnerMode
-                ? "Shows teaching hints, hover help, and plain-language Git meaning."
-                : "Compact expert view. Raw Git truth stays visible."}
-            </div>
-          </div>
-
-          <div className="repo-main-card">
-            <div className="repo-main-card__title">Repository</div>
-            <div className="repo-main-card__note">Select a discovered local Git project.</div>
-
-            <select
-              value={repoPath}
-              onChange={(event) => setRepoPath(event.target.value)}
-            >
-              {repos.length ? (
-                repos.map((repo) => (
-                  <option key={repo.path} value={repo.path}>
-                    {repo.name} · {repo.path}
-                  </option>
-                ))
-              ) : (
-                <option value={repoPath}>{repoPath}</option>
-              )}
-            </select>
-
-            <div className="repo-main-card__path">{repoPath}</div>
-
-            <button className="status-refresh-button" title={beginnerTitle("Scan repositories\n\nSearches safe local folders for Git projects and updates the repository selector.")} onClick={loadRepos}>
-              Scan repositories
-            </button>
-          </div>
-
-          <div className="status-box">
-            <div className="status-box__label">Git</div>
-            <div>{gitVersion}</div>
-            <div className="status-box__label">Branch</div>
-            <div>{data.branch}</div>
-            <div className="status-box__label">State</div>
-            <div>{lastRefresh || "not refreshed yet"}</div>
-            <div className="button-with-help">
-              <button className="status-refresh-button" title={beginnerTitle("Refresh app state\n\nReloads repository status, remote awareness, and Time Machine history. This does not change files.")} onClick={refreshAppState}>
-                Refresh app state
-              </button>
-              <ActionExplainButton
-                title="Explain Refresh app state"
-                plainText="Refresh app state reloads ChronoGit's view of Git status and Time Machine history from local Git truth."
-                rawTruth="Refresh reads local repository status and history again. It does not change files."
-              />
-            </div>
-          </div>
-
-          <div className={`remote-main-card remote-main-card--${remoteStateClass(remoteStatus)}`}>
-            <div className="remote-main-card__title">Remote</div>
-            <div className="remote-main-card__state">{remoteStateLabel(remoteStatus)}</div>
-            <div className="remote-main-card__line">
-              Branch: <span>{remoteStatus?.branch || data.branch}</span>
-            </div>
-            <div className="remote-main-card__line">
-              Upstream: <span>{remoteStatus?.upstream || "none"}</span>
-            </div>
-            <div className="remote-main-card__line">
-              Ahead / behind: <span>+{remoteStatus?.ahead ?? 0} / -{remoteStatus?.behind ?? 0}</span>
-            </div>
-            <div className="remote-main-card__url">
-              {remoteStatus?.remote_url || "No remote URL detected"}
-            </div>
-          </div>
-
-          <div className="llm-main-card">
-            <div className="llm-main-card__title">Local LLM</div>
-            <div className="llm-main-card__note">Local-only explain layer. No cloud API.</div>
-
-            <div className="llm-main-card__controls">
-              <label>
-                Engine
-                <select
-                  value={llmEngine}
-                  onChange={(event) => setLlmEngine(event.target.value)}
-                >
-                  <option value="ollama">Ollama</option>
-                </select>
-              </label>
-
-              <label>
-                Model
-                <select
-                  value={llmModel}
-                  onChange={(event) => setLlmModel(event.target.value)}
-                >
-                  {localModels.length ? (
-                    localModels.map((model) => (
-                      <option key={model.name} value={model.name}>
-                        {model.name} · {model.parameter_size} · {model.quantization_level}
-                      </option>
-                    ))
-                  ) : (
-                    <option value={llmModel}>{llmModel || "No models discovered"}</option>
-                  )}
-                </select>
-              </label>
-            </div>
-
-            <div className="llm-main-card__meta">
-              {selectedModel
-                ? `${selectedModel.family} · ${selectedModel.parameter_size} · ${selectedModel.quantization_level} · ${(selectedModel.size / 1024 / 1024 / 1024).toFixed(1)} GB`
-                : "Model metadata unavailable"}
-            </div>
-
-            <div className="button-with-help">
-              <button className="status-refresh-button" title={beginnerTitle("Scan installed models\n\nAsks the selected local LLM engine which models are installed on this computer.")} onClick={() => loadLocalModels()}>
-                Scan installed models
-              </button>
-              <ActionExplainButton
-                title="Explain Scan installed models"
-                plainText="Scan installed models asks the selected local LLM engine which models are available on this computer."
-                rawTruth="For Ollama, ChronoGit queries the local API at 127.0.0.1:11434/api/tags."
-              />
-            </div>
-          </div>
+        <div className="chronogit-titlebar__truth">
+          <label>
+            Repository
+            <RepoDropdown value={state.repoPath} repos={repos} onChange={setRepoPath} beginnerMode={state.beginnerMode} />
+          </label>
+          <div className="chronogit-titlebar__fact"><strong>Git</strong><span>{gitVersion}</span></div>
+          <div className="chronogit-titlebar__fact"><strong>Branch</strong><span>{data?.branch || "unknown"}</span></div>
+          <div className="chronogit-titlebar__fact"><strong>Changes</strong><span>{data ? `${data.working.length} working · ${data.staged.length} prepared` : "not loaded"}</span></div>
+          <div className="chronogit-titlebar__fact"><strong>Remote</strong><span>{remoteLabel(remote)} {remote ? `+${remote.ahead} / -${remote.behind}` : ""}</span></div>
+          <button onClick={loadRepos}>{ui(state.beginnerMode, "Scan repositories", "discover_git_repos")}</button>
+          <button onClick={() => refresh()}>{ui(state.beginnerMode, "Refresh Git state", "git status")}</button>
+          <button className="chronogit-titlebar__mode" onClick={() => setState((current) => ({ ...current, beginnerMode: !current.beginnerMode }))}>
+            {ui(state.beginnerMode, "Beginner: ON", "Beginner: OFF")}
+          </button>
         </div>
-      </header>
+      </div>
 
-      <section className="state-dashboard">
-        <section className={`truth-strip truth-strip--${remoteStateClass(remoteStatus)}`}>
-          <div title="Working-folder changes are files changed on disk but not prepared for the next commit."><strong>Working</strong><span>{data.working.length}</span></div>
-          <div title="Prepared changes are staged files that will be included if you commit now."><strong>Prepared</strong><span>{data.staged.length}</span></div>
-          <div title="Remote shows whether your local branch is synced with its remote tracking branch."><strong>Remote</strong><span>{remoteTruthText(remoteStatus)}</span></div>
-          <div title="State summarizes the local/remote relationship."><strong>State</strong><span>{remoteStateLabel(remoteStatus)}</span></div>
-        </section>
-
-        <div className="current-state-card">
-          <div>
-            <div className="current-state-card__label">Current state</div>
-            <h2>{remoteStateLabel(remoteStatus)}</h2>
-            <p>{explainRemoteHuman(remoteStatus)}</p>
-          </div>
-
-          <div className="current-state-card__facts">
-            <span><strong>Repo</strong>{repos.find((repo) => repo.path === repoPath)?.name || "Selected repository"}</span>
-            <span><strong>Branch</strong>{remoteStatus?.branch || data.branch}</span>
-            <span><strong>Upstream</strong>{remoteStatus?.upstream || "none"}</span>
-          </div>
-
-          <div className="current-state-card__last">
-            <strong>Last action</strong>
-            <span>{lastAction}</span>
-          </div>
-        </div>
-      </section>
-
-      {operationState && hasInterruptedOperation(operationState) ? (
-        <section className={`operation-state-banner operation-state-banner--${operationStateClass(operationState)}`}>
-          <div>
-            <strong>Git operation state: {operationStateLabel(operationState)}</strong>
-            <span>{operationState.warning}</span>
-          </div>
-
-          {operationState.conflicted_files.length ? (
-            <div className="operation-state-banner__files">
-              {operationState.conflicted_files.map((file) => (
-                <code key={file}>{file}</code>
-              ))}
-            </div>
-          ) : null}
-
-          {operationState.rebase_in_progress ? (
-            <button className="danger-button" disabled={remoteBusy !== ""} onClick={abortRebase}>
-              Abort rebase
-            </button>
-          ) : null}
-        </section>
-      ) : null}
-
-      <section className="flow-strip flow-strip--compact">
-        <div className="flow-step">
-          <strong>Working files</strong>
-          <span>{data.working.length} not prepared</span>
-        </div>
-        <div className="flow-arrow">→</div>
-        <div className="flow-step">
-          <strong>Prepared changes</strong>
-          <span>{data.staged.length} ready for snapshot</span>
-        </div>
-        <div className="flow-arrow">→</div>
-        <div className="flow-step flow-step--locked">
-          <strong>Snapshot</strong>
-          <span>{data.staged.length ? "Review preflight next" : "Prepare files first"}</span>
-        </div>
-      </section>
-
-      <section className="ui-explain-shortcuts">
-        <button
-          disabled={uiExplainBusy || !llmModel}
-          onClick={() => explainUiContext({
-            kind: "git_flow",
-            title: "Explain ChronoGit flow",
-            plainText: "ChronoGit presents Git as Working files → Prepared changes → Snapshot.",
-            rawTruth: "Working files are local disk changes. Prepared changes are staged files. Snapshot means Git commit.",
-          })}
-        >
-          Ask LLM: explain Git flow
-        </button>
-        <button
-          disabled={uiExplainBusy || !llmModel}
-          onClick={() => explainUiContext({
-            kind: "time_machine",
-            title: "Explain Time Machine",
-            plainText: "Time Machine lets users inspect earlier Git snapshots, changed files, file diffs, and restore selected files.",
-            rawTruth: "Snapshot list is commit history. Changed files are detected per selected snapshot. File diff shows the patch for one selected file. Restore only restores one selected file into the working folder; it does not commit automatically and does not reset the whole repository.",
-          })}
-        >
-          Ask LLM: explain Time Machine
-        </button>
-      </section>
-
-
-
-      <section className="preflight-card">
-        <div>
-          <h2>Commit Preflight</h2>
-          <p>Jarri safety mode is active. ChronoGit reviews prepared files before any snapshot is created.</p>
-        </div>
-        <div className="preflight-card__actions">
+      <div className="cg-tabs">
+        {state.tabs.map((tab) => (
           <button
-            disabled={uiExplainBusy || !llmModel}
-            onClick={() => explainUiContext({
-              kind: "preflight",
-              title: "Explain Snapshot Preflight",
-              plainText: "Snapshot Preflight reviews only files prepared for the next commit. Files still in the working folder are not included in the commit.",
-              rawTruth: JSON.stringify({
-                staged_count: data.staged.length,
-                working_count: data.working.length,
-                staged: data.staged,
-                rule: "Only staged (prepared) files will be included in the commit. Working-folder files are excluded."
-              }, null, 2),
-            })}
+            key={tab.id}
+            className={tab.id === activeTab.id ? "cg-tab cg-tab--active" : "cg-tab"}
+            onClick={() => setState((current) => ({ ...current, activeTabId: tab.id }))}
+            onDoubleClick={() => renameTab(tab.id)}
+            title={ui(state.beginnerMode, "Double-click to rename tab", "rename tab")}
           >
-            Ask LLM
+            {tab.name}
+            <span onClick={(event) => { event.stopPropagation(); renameTab(tab.id); }}>✎</span>
+            <span onClick={(event) => { event.stopPropagation(); closeTab(tab.id); }}>×</span>
           </button>
-          <button title={beginnerTitle("Review snapshot / Git commit\n\nOpens preflight before creating a commit. Only prepared files will be included.")} disabled={data.staged.length === 0} onClick={openSnapshotPreflight}>
-            Review snapshot / Git commit ({data.staged.length})
-          </button>
-          <ActionExplainButton
-            title="Explain Review snapshot / Git commit"
-            plainText="Review snapshot opens the commit preflight. Only prepared files will be included in the Git commit."
-            rawTruth={JSON.stringify({
-              staged_count: data.staged.length,
-              working_count: data.working.length,
-              rule: "Only staged/prepared files are included in the commit."
-            }, null, 2)}
-          />
+        ))}
+        <button className="cg-tab cg-tab--add" onClick={addTab}>+ Tab</button>
+        <div className="cg-panel-add">
+          <PanelDropdown value={selectedPanelType} onChange={setSelectedPanelType} beginnerMode={state.beginnerMode} />
+          <button onClick={() => addPanel(selectedPanelType)}>+ Panel</button>
         </div>
-      </section>
+      </div>
 
-      <section className="summary-grid">
-        <div className="summary-card">
-          <div className="summary-card__number">{data.working.length}</div>
-          <div>working changes</div>
-        </div>
-        <div className="summary-card">
-          <div className="summary-card__number">{data.staged.length}</div>
-          <div>prepared changes</div>
-        </div>
-        <div className="summary-card">
-          <div className="summary-card__number">{totalChanges}</div>
-          <div>total visible changes</div>
-        </div>
-      </section>
-
-      <section className="columns">
-        <div className="panel">
-          <div className="panel__header">
-            <h2>Prepared for next commit</h2>
-            <p>These files are already staged. If you commit now, they become part of history.</p>
-          </div>
-          {data.staged.length ? renderGrouped(data.staged) : <div className="empty">Nothing prepared yet.</div>}
-        </div>
-
-        <div className="panel">
-          <div className="panel__header">
-            <h2>Working folder changes</h2>
-            <p>These changes exist on disk, but are not part of the next commit unless prepared.</p>
-          </div>
-          {data.working.length ? renderGrouped(data.working) : <div className="empty">Working folder is clean.</div>}
-        </div>
-      </section>
-
-      {false ? (
-        <section className="ui-explain-panel">
-          <div className="ui-explain-panel__header">
-            <div>
-              <div className="ui-explain-panel__eyebrow">Local LLM · UI explanation</div>
-              <h2>{uiExplainTitle || "ChronoGit explanation"}</h2>
-            </div>
-            <div className="ui-explain-panel__actions">
-              <button onClick={() => setUiExplainOpen((value) => !value)}>
-                {uiExplainOpen ? "Hide explanation" : "Read explanation"}
-              </button>
-              {uiExplainText ? (
-                <button
-                  onClick={async () => {
-                    await navigator.clipboard.writeText(uiExplainText);
-                    setUiExplainStatus("UI explanation copied to clipboard.");
-                  }}
-                >
-                  Copy result
-                </button>
-              ) : null}
-            </div>
-          </div>
-
-          {uiExplainStatus ? <div className="ui-explain-panel__status">{uiExplainStatus}</div> : null}
-          <div className="ui-explain-panel__warning">
-            Local LLM output is advisory. ChronoGit UI state and Git output remain authoritative.
-          </div>
-          {uiExplainText && uiExplainOpen ? <pre>{uiExplainText}</pre> : null}
+      {hasInterruptedOperation(operationState) ? (
+        <section className="operation-state-banner">
+          <strong>{operationLabel(operationState)}</strong>
+          <span>{operationState?.warning}</span>
+          {operationState?.conflicted_files.map((file) => <code key={file}>{file}</code>)}
+          {operationState?.rebase_in_progress ? <button className="danger-button" onClick={abortRebase}>{ui(state.beginnerMode, "Abort rebase", "git rebase --abort")}</button> : null}
         </section>
       ) : null}
 
-      <TimelinePanel
-        repoPath={repoPath}
-        refreshTick={historyRefreshTick}
-        setConfirmAction={setConfirmAction}
-        llmEngine={llmEngine}
-        llmModel={llmModel}
-        appendLlmEntry={appendLlmEntry}
-        beginnerMode={beginnerMode}
-      />
-
-
-      <section className="remote-actions-panel">
-        <div className="remote-actions-panel__header">
-          <div>
-            <h2>Remote synchronization preview</h2>
-            <p>Fetch updates remote knowledge. Upload/download previews do not push, pull, merge, or modify working files.</p>
-          </div>
-          <div className="remote-actions-panel__buttons">
-            <button title={beginnerTitle("Fetch remote knowledge\n\nUpdates Git's knowledge of the remote branch. Does not change working files, merge, pull, or push.")} disabled={remoteBusy !== ""} onClick={fetchRemoteKnowledge}>
-              {remoteBusy === "fetch" ? "Fetching..." : "Fetch remote knowledge"}
-            </button>
-            <button title={beginnerTitle("Upload snapshots preview\n\nShows local commits that would be shared. Preview only: does not push.")} disabled={remoteBusy !== ""} onClick={() => loadRemotePreview("push")}>
-              {remoteBusy === "push" ? "Checking..." : "Upload snapshots (preview)"}
-            </button>
-            <button title={beginnerTitle("Download updates preview\n\nShows remote commits that could be downloaded. Preview only: does not pull or merge.")} disabled={remoteBusy !== ""} onClick={() => loadRemotePreview("pull")}>
-              {remoteBusy === "pull" ? "Checking..." : "Download updates (preview)"}
-            </button>
-            <button title={beginnerTitle("Abort rebase\n\nUse only if Git started a rebase and the download/merge failed or conflicted.")} disabled={remoteBusy !== ""} className="danger-button" onClick={abortRebase}>
-              {remoteBusy === "abort_rebase" ? "Aborting..." : "Abort rebase"}
-            </button>
-          </div>
-        </div>
-
-        {beginnerMode ? (
-          <div className="remote-beginner-help">
-            <strong>Remote help:</strong> Fetch only updates knowledge. Upload shares local snapshots. Download brings remote snapshots into this branch. Rebase tries to replay your local snapshots after remote updates. Abort rebase is the emergency stop if Git reports a failed/conflicted rebase.
-          </div>
-        ) : null}
-
-        {remotePreview ? (
-          <div className="remote-preview-box">
-            <div className="remote-preview-box__truth">
-              <div><strong title={maybeBeginnerTitle(beginnerMode, "Operation", "This is the remote preview type. Upload preview means local snapshots that could be shared. Download preview means remote snapshots that could be brought into this branch.")}>Operation</strong><span>{remotePreview.operation}</span></div>
-              <div><strong title={maybeBeginnerTitle(beginnerMode, "Branch", "The local branch being compared against its configured upstream branch.")}>Branch</strong><span>{remotePreview.branch}</span></div>
-              <div><strong title={maybeBeginnerTitle(beginnerMode, "Upstream", "The remote-tracking branch Git uses as the comparison target for ahead/behind.")}>Upstream</strong><span>{remotePreview.upstream || "none"}</span></div>
-              <div><strong title={maybeBeginnerTitle(beginnerMode, "Ahead / Behind", "Ahead means local snapshots not on the remote. Behind means remote snapshots not in your local branch. If both are nonzero, the branch is diverged.")}>Ahead / Behind</strong><span>+{remotePreview.ahead} / -{remotePreview.behind}</span></div>
-            </div>
-
-            <div className="remote-preview-box__message">
-              <strong>Consequence</strong>
-              <span>{remotePreview.consequence}</span>
-            </div>
-
-            <div className="remote-preview-box__warning">
-              <strong title={maybeBeginnerTitle(beginnerMode, "Warning", "This explains the main risk or limitation of the selected remote direction.")}>Warning</strong>
-              <span>{remotePreview.warning}</span>
-            </div>
-
-            <div className="remote-merge-safety">
-              <div>
-                <strong title={maybeBeginnerTitle(beginnerMode, "Safe merge prediction", "ChronoGit compares local-only and remote-only touched paths before any real merge. This is a prediction only; Git remains the authority.")}>Safe merge prediction</strong>
-                <span>{remotePreview.merge_safety.classification}</span>
-              </div>
-              <p>{remotePreview.merge_safety.summary}</p>
-              <p>{remotePreview.merge_safety.warning}</p>
-
-              <div className="merge-condition-line">
-                <strong title={maybeBeginnerTitle(beginnerMode, "Condition", "Extra state that changes risk. For example, a dirty working tree means uncommitted local changes exist.")}>Condition</strong>
-                <span>{mergeClassificationCondition(remotePreview)}</span>
-              </div>
-
-              <div className="remote-merge-safety__facts">
-                <div
-                  className={`merge-risk merge-risk--${remotePreview.merge_safety.risk_level.toLowerCase()}`}
-                  title={maybeBeginnerTitle(beginnerMode, "Risk", "LOW means no overlap and clean working tree. MEDIUM means either overlap or dirty working tree. HIGH means overlap plus dirty working tree. Intentional override may be allowed, but never silently.")}
-                >
-                  RISK: {remotePreview.merge_safety.risk_level}
-                </div>
-                <code title={maybeBeginnerTitle(beginnerMode, "Local touched", "Number of unique paths touched by local-only commits.")}>local touched: {remotePreview.merge_safety.local_touched_files}</code>
-                <code title={maybeBeginnerTitle(beginnerMode, "Remote touched", "Number of unique paths touched by remote-only commits.")}>remote touched: {remotePreview.merge_safety.remote_touched_files}</code>
-                <code title={maybeBeginnerTitle(beginnerMode, "Working changes", "Current uncommitted changes in the working folder. These are not local snapshots yet and can make remote actions harder to reason about.")}>working changes: {remotePreview.merge_safety.working_changes}</code>
-              </div>
-
-              <div className="path-overlap-analysis">
-                <h3 title={maybeBeginnerTitle(beginnerMode, "Path overlap analysis", "Shows why ChronoGit thinks a merge is likely clean or risky. No overlap means local and remote commits touched different paths.")}>Path overlap analysis</h3>
-                <div className="path-overlap-analysis__grid">
-                  <div>
-                    <strong title={maybeBeginnerTitle(beginnerMode, "Local-only paths", "Files touched by commits that exist locally but not on the remote.")}>Local-only paths</strong>
-                    {remotePreview.merge_safety.local_files.length ? (
-                      remotePreview.merge_safety.local_files.map((file) => <code key={`local-${file}`}>{file}</code>)
-                    ) : (
-                      <span>No local-only paths.</span>
-                    )}
-                  </div>
-                  <div>
-                    <strong title={maybeBeginnerTitle(beginnerMode, "Remote-only paths", "Files touched by commits that exist on the remote but not in this local branch.")}>Remote-only paths</strong>
-                    {remotePreview.merge_safety.remote_files.length ? (
-                      remotePreview.merge_safety.remote_files.map((file) => <code key={`remote-${file}`}>{file}</code>)
-                    ) : (
-                      <span>No remote-only paths.</span>
-                    )}
-                  </div>
-                  <div>
-                    <strong title={maybeBeginnerTitle(beginnerMode, "Overlap", "Paths touched by both local-only and remote-only commits. Overlap increases merge conflict risk.")}>Overlap</strong>
-                    {remotePreview.merge_safety.shared_files.length ? (
-                      remotePreview.merge_safety.shared_files.map((file) => <code className="path-overlap-analysis__danger" key={`shared-${file}`}>{file}</code>)
-                    ) : (
-                      <span>No same-path overlap detected.</span>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              <div className={`remote-safety-gate remote-safety-gate--${remotePreview.merge_safety.risk_level.toLowerCase()}`}>
-                <strong>{remoteSafetyGateTitle(remotePreview)}</strong>
-                <span>{remoteSafetyGateText(remotePreview)}</span>
-                <em>{remoteRecommendedAction(remotePreview)}</em>
-                <div className="remote-safety-gate__policy">{guardedRemoteActionPolicy(remotePreview)}</div>
-                {remotePreview.operation === "upload_snapshots_preview" ? (
-                  <div className={`remote-upload-arm-state ${isUploadPreviewArmed(remotePreview) ? "remote-upload-arm-state--armed" : ""}`}>
-                    {isUploadPreviewArmed(remotePreview)
-                      ? "Step 2 ready: this exact preview is acknowledged. Execute push is now available."
-                      : "Step 1: acknowledge this preview. No push happens in step 1."}
-                  </div>
-                ) : null}
-                <button
-                  className={remotePreview.merge_safety.risk_level === "HIGH" ? "danger-button" : ""}
-                  onClick={() => {
-                    const preview = remotePreview;
-                    const uploadArmed = isUploadPreviewArmed(preview);
-
-                    setConfirmAction({
-                      title: preview.operation === "upload_snapshots_preview" && uploadArmed
-                        ? "Execute push: final confirmation"
-                        : guardedRemoteActionTitle(preview),
-                      body: preview.operation === "upload_snapshots_preview" && uploadArmed
-                        ? [
-                            "Requested action: execute git push",
-                            "",
-                            `Risk: ${preview.merge_safety.risk_level}`,
-                            `Classification: ${preview.merge_safety.classification}`,
-                            `Ahead / behind: +${preview.ahead} / -${preview.behind}`,
-                            "",
-                            "This will upload local snapshots to the configured remote.",
-                            "ChronoGit will not force push, pull, merge, or rebase.",
-                            "Working files should not be changed by this action.",
-                          ].join("\n")
-                        : guardedRemoteActionBody(preview),
-                      confirmLabel: preview.operation === "upload_snapshots_preview" && uploadArmed
-                        ? "Execute git push"
-                        : preview.operation === "upload_snapshots_preview"
-                          ? "Acknowledge preview only"
-                          : guardedRemoteActionLabel(preview),
-                      danger: preview.merge_safety.risk_level === "HIGH",
-                      requiredText: preview.merge_safety.risk_level === "HIGH" ? "override" : undefined,
-                      requiredTextLabel: preview.merge_safety.risk_level === "HIGH" ? "Type override to intentionally continue despite HIGH risk." : undefined,
-                      action: async () => {
-                        if (preview.operation === "download_updates_preview") {
-                          await executePullRebase(preview);
-                          return;
-                        }
-
-                        if (!uploadArmed) {
-                          setArmedRemoteUploadKey(remotePreviewKey(preview));
-                          setLastAction("Upload preview acknowledged. No push executed. Execute push is now available for this exact preview.");
-                          setMessage("Upload preview acknowledged. No push executed. Execute push is now available for this exact preview.");
-                          return;
-                        }
-
-                        await executePush(preview);
-                      },
-                    });
-                    setConfirmText("");
-                  }}
-                >
-                  {remotePreview.operation === "upload_snapshots_preview" && isUploadPreviewArmed(remotePreview)
-                    ? "Execute push (safe)"
-                    : remotePreview.operation === "upload_snapshots_preview"
-                      ? "Acknowledge preview only"
-                      : remotePreview.merge_safety.risk_level === "HIGH"
-                        ? "Override high-risk gate"
-                        : remotePreview.merge_safety.risk_level === "MEDIUM"
-                          ? "Confirm intention"
-                          : "Confirm low-risk intention"}
-                </button>
-              </div>
-            </div>
-
-            <div className="remote-preview-columns">
-              <div>
-                <h3 title={maybeBeginnerTitle(beginnerMode, "Snapshots", "Commits in the selected direction only. Upload preview shows local-only snapshots. Download preview shows remote-only snapshots.")}>Snapshots ({remotePreview.commit_count})</h3>
-                {remotePreview.commits.length ? (
-                  remotePreview.commits.map((commit) => <code key={commit}>{commit}</code>)
-                ) : (
-                  <span className="remote-preview-empty">No snapshots in this direction.</span>
-                )}
-              </div>
-
-              <div>
-                <h3 title={maybeBeginnerTitle(beginnerMode, "Files that differ", "Files touched by snapshots in the selected direction only. This is not a full tree diff.")}>Files that differ ({remotePreview.changed_files.length})</h3>
-                {remotePreview.changed_files.length ? (
-                  remotePreview.changed_files.map((file) => (
-                    <code key={`${file.status}-${file.path}`}>{file.status} {file.path}</code>
-                  ))
-                ) : (
-                  <span className="remote-preview-empty">No file differences in this direction.</span>
-                )}
-              </div>
-            </div>
-          </div>
-        ) : null}
+      <section className="cg-canvas">
+        {activeTab.panels.map((panel) => (
+          <section key={panel.id} className="cg-panel" style={{ left: panel.x, top: panel.y, width: panel.w, height: panel.h }}>
+            <header className="cg-panel__header" onPointerDown={(event) => beginDrag(event, panel)}>
+              <strong>{panel.title}</strong>
+              <button onClick={() => closePanel(panel.id)}>×</button>
+            </header>
+            {renderPanel(panel)}
+            <div className="cg-panel__resize" onPointerDown={(event) => beginResize(event, panel)} />
+          </section>
+        ))}
       </section>
-
-
-      <section ref={llmDockRef} className={`chrono-log-dock ${llmDockPulse ? "chrono-log-dock--pulse" : ""}`}>
-        <div className="chrono-log-pane">
-          <div className="chrono-log-pane__header chrono-log-pane__header--with-filters">
-            <div>
-              <h2>System Log</h2>
-              <span>Deterministic ChronoGit events only.</span>
-            </div>
-
-            <div className="system-log-filters">
-              {(["all", "action", "warning", "error", "info"] as const).map((filter) => (
-                <button
-                  key={filter}
-                  className={systemLogFilter === filter ? "system-log-filter system-log-filter--active" : "system-log-filter"}
-                  onClick={() => setSystemLogFilter(filter)}
-                >
-                  {filter}
-                </button>
-              ))}
-              <button onClick={() => { setSystemLog([]); localStorage.removeItem("chronogit_system_log"); }}>Clear</button>
-            </div>
-          </div>
-
-          <div className="chrono-log-pane__body">
-            {visibleSystemLog.length ? (
-              [...visibleSystemLog].reverse().map((entry) => (
-                <article className={`system-log-entry system-log-entry--${entry.level}`} key={entry.id}>
-                  <div className="system-log-entry__time">
-  <span className="system-log-entry__date">{entry.date}</span>
-  <span className="system-log-entry__clock">{entry.time}</span>
-</div>
-                  <strong>{entry.level}</strong>
-                  <p>{entry.message}</p>
-                  <div className="system-log-entry__actions">
-  <button
-    title={beginnerMode ? "Copy this exact system log message to clipboard." : undefined}
-    onClick={() => navigator.clipboard.writeText(entry.message)}
-  >
-    Copy
-  </button>
-  <button
-    title={beginnerMode ? "Ask the local LLM to explain this exact system event. This does not change anything in your repository." : undefined}
-    disabled={uiExplainBusy || !llmModel}
-    onClick={() => explainUiContext({
-      kind: "system_log",
-      title: `Explain system log entry`,
-      plainText: entry.message,
-      rawTruth: JSON.stringify(entry, null, 2),
-    })}
-  >
-    Explain
-  </button>
-</div>
-                </article>
-              ))
-            ) : (
-              <div className="chrono-log-empty">
-                {systemLogFilter === "all"
-                  ? "No system events in this session yet."
-                  : `No ${systemLogFilter} system events in this session.`}
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="chrono-log-pane">
-          <div className="chrono-log-pane__header">
-            <div>
-              <h2>LLM Responses</h2>
-              <span>Advisory explanations only. Git remains authoritative.</span>
-            </div>
-            <button onClick={() => { setLlmLog([]); localStorage.removeItem("chronogit_llm_log"); }}>Clear</button>
-          </div>
-
-          <div className="chrono-log-pane__body chrono-log-pane__body--llm">
-            {llmLog.length ? (
-              [...llmLog].reverse().map((entry) => (
-                <article className="llm-log-entry" key={entry.id}>
-                  <div className="llm-log-entry__meta">
-                    <span>{entry.timestamp}</span>
-                    <strong>{entry.source}</strong>
-                    <code>{entry.model}</code>
-                  </div>
-                  <h3>{entry.title}</h3>
-                  <pre>{entry.content}</pre>
-                  <button onClick={() => navigator.clipboard.writeText(entry.content)}>Copy message</button>
-                </article>
-              ))
-            ) : (
-              <div className="chrono-log-empty">No LLM responses in this session yet.</div>
-            )}
-          </div>
-        </div>
-      </section>
-
-      </WorkspaceCanvas>
 
       {confirmAction ? (
         <div className="confirm-overlay">
           <div className={`confirm-modal ${confirmAction.danger ? "confirm-modal--danger" : ""}`}>
-            <div className="confirm-modal__eyebrow">
-              {confirmAction.danger ? "Destructive action" : "Confirmation"}
-            </div>
+            <div className="confirm-modal__eyebrow">{confirmAction.danger ? "Destructive action" : "Confirmation"}</div>
             <h2>{confirmAction.title}</h2>
             <pre>{confirmAction.body}</pre>
-
+            {confirmAction.requiredText ? (
+              <label className="confirm-required-text">
+                <span>{confirmAction.requiredTextLabel || `Type ${confirmAction.requiredText} to continue.`}</span>
+                <input value={confirmText} onChange={(event) => setConfirmText(event.target.value)} placeholder={confirmAction.requiredText} />
+              </label>
+            ) : null}
             <div className="confirm-modal__actions">
               <button onClick={() => { setConfirmAction(null); setConfirmText(""); }}>Cancel</button>
-              {confirmAction.requiredText ? (
-                <label className="confirm-required-text">
-                  <span>{confirmAction.requiredTextLabel || `Type ${confirmAction.requiredText} to continue.`}</span>
-                  <input
-                    value={confirmText}
-                    onChange={(event) => setConfirmText(event.target.value)}
-                    placeholder={confirmAction.requiredText}
-                  />
-                </label>
-              ) : null}
-
               <button
                 className={confirmAction.danger ? "danger-button" : "confirm"}
                 disabled={Boolean(confirmAction.requiredText && confirmText.trim() !== confirmAction.requiredText)}
                 onClick={async () => {
-                  const actionToRun = confirmAction.action;
+                  const action = confirmAction.action;
                   setConfirmAction(null);
                   setConfirmText("");
-                  await actionToRun();
+                  await action();
                 }}
               >
                 {confirmAction.confirmLabel}
@@ -2019,72 +1642,359 @@ export default function App() {
       {showPreflight ? (
         <div className="preflight-overlay">
           <div className="preflight-modal">
-            <h2>Snapshot Preflight</h2>
-            <p>You are about to create a Git snapshot. Only prepared files will be included.</p>
-
+            <h2>{ui(state.beginnerMode, "Snapshot Preflight", "git commit preflight")}</h2>
+            <p>{ui(state.beginnerMode, "Only prepared files will be included.", "Only index/staged files are committed.")}</p>
             <div className="snapshot-boundary-box">
-              <h3>Next snapshot contains:</h3>
+              <h3>{ui(state.beginnerMode, "Next snapshot contains", "git diff --cached --stat")}</h3>
               <div className="snapshot-boundary-grid">
-                <div><strong>{commitPreflight?.staged_files ?? data.staged.length}</strong><span>files</span></div>
+                <div><strong>{commitPreflight?.staged_files ?? data?.staged.length ?? 0}</strong><span>files</span></div>
                 <div><strong>+{commitPreflight?.insertions ?? 0}</strong><span>insertions</span></div>
                 <div><strong>-{commitPreflight?.deletions ?? 0}</strong><span>deletions</span></div>
               </div>
-              <p>This creates a LOCAL snapshot only. It does not upload, push, or share anything.</p>
-              <p>{snapshotRemoteSentence(remoteStatus)}</p>
-              {snapshotImpact ? (
-                <div className="snapshot-impact-warning">
-                  <strong>{snapshotImpact.label}</strong>
-                  <span>{snapshotImpact.text}</span>
-                </div>
-              ) : (
-                <div className="snapshot-impact-ok">
-                  <strong>No large-impact warning</strong>
-                  <span>This snapshot is below ChronoGit's deterministic size-risk thresholds.</span>
-                </div>
-              )}
+              <p>{snapshotRemoteSentence(remote)}</p>
+              {snapshotImpact ? <div className="snapshot-impact-warning"><strong>{snapshotImpact.label}</strong><span>{snapshotImpact.text}</span></div> : null}
             </div>
-
-            <h3>Included files ({data.staged.length})</h3>
-            <div className="preflight-list">
-              {data.staged.map((file) => (
-                <div key={file.path} className="preflight-item">✔ {file.path}</div>
-              ))}
-            </div>
-
-            {preflightWarnings.length > 0 ? (
-              <>
-                <h3>Warnings ({preflightWarnings.length})</h3>
-                <div className="preflight-warnings">
-                  {preflightWarnings.map((file) => (
-                    <div key={file.path} className="warning-item">⚠ {file.path} — {file.risk}</div>
-                  ))}
-                </div>
-              </>
-            ) : (
-              <p>No dangerous prepared files detected.</p>
-            )}
-
-            <h3>Commit message</h3>
-            <input
-              className="preflight-input"
-              value={commitMessage}
-              onChange={(event) => setCommitMessage(event.target.value)}
-              placeholder="Describe this snapshot..."
-            />
-
+            <h3>Included files ({data?.staged.length ?? 0})</h3>
+            <div className="preflight-list">{data?.staged.map((file) => <div key={file.path} className="preflight-item">✔ {file.path}</div>)}</div>
+            {preflightWarnings.length ? (
+              <div className="preflight-warnings">{preflightWarnings.map((file) => <div key={file.path} className="warning-item">⚠ {file.path} — {file.risk}</div>)}</div>
+            ) : <p>No dangerous prepared files detected.</p>}
+            <input className="preflight-input" value={commitMessage} onChange={(event) => setCommitMessage(event.target.value)} placeholder={ui(state.beginnerMode, "Describe this snapshot...", "commit message")} />
             <div className="preflight-actions">
               <button onClick={() => setShowPreflight(false)}>Cancel</button>
-              <button
-                className="confirm"
-                disabled={!commitMessage.trim() || hasCritical}
-                onClick={confirmSnapshot}
-              >
-                Create snapshot (Git commit)
-              </button>
+              <button className="confirm" disabled={!commitMessage.trim() || hasCritical} onClick={confirmSnapshot}>{ui(state.beginnerMode, "Create snapshot", "git commit")}</button>
             </div>
           </div>
         </div>
       ) : null}
     </main>
+  );
+}
+
+function RemoteActionsPanel({
+  beginnerMode,
+  remoteBusy,
+  remotePreview,
+  fetchRemoteKnowledge,
+  loadRemotePreview,
+  abortRebase,
+  isUploadPreviewArmed,
+  setConfirmAction,
+  setConfirmText,
+  setArmedRemoteUploadKey,
+  setLastAction,
+  setMessage,
+  executePush,
+  executePullRebase,
+  explainUiContext,
+  uiExplainBusy,
+  llmModel,
+}: {
+  beginnerMode: boolean;
+  remoteBusy: string;
+  remotePreview: RemoteOperationPreview | null;
+  fetchRemoteKnowledge: () => Promise<void>;
+  loadRemotePreview: (kind: "push" | "pull") => Promise<void>;
+  abortRebase: () => Promise<void>;
+  isUploadPreviewArmed: (preview: RemoteOperationPreview) => boolean;
+  setConfirmAction: (action: ConfirmAction | null) => void;
+  setConfirmText: (text: string) => void;
+  setArmedRemoteUploadKey: (key: string) => void;
+  setLastAction: (text: string) => void;
+  setMessage: (text: string) => void;
+  executePush: (preview: RemoteOperationPreview) => Promise<void>;
+  executePullRebase: (preview: RemoteOperationPreview) => Promise<void>;
+  explainUiContext: (context: ExplainContext) => Promise<void>;
+  uiExplainBusy: boolean;
+  llmModel: string;
+}) {
+  return (
+    <div className="cg-panel-content remote-actions-panel">
+      <div className="remote-actions-panel__buttons">
+        <button disabled={remoteBusy !== ""} onClick={fetchRemoteKnowledge}>{ui(beginnerMode, "Fetch remote knowledge", "git fetch")}</button>
+        <button disabled={remoteBusy !== ""} onClick={() => loadRemotePreview("push")}>{ui(beginnerMode, "Upload snapshots preview", "git push --dry-run")}</button>
+        <button disabled={remoteBusy !== ""} onClick={() => loadRemotePreview("pull")}>{ui(beginnerMode, "Download updates preview", "git pull preview")}</button>
+        <button className="danger-button" disabled={remoteBusy !== ""} onClick={abortRebase}>{ui(beginnerMode, "Abort rebase", "git rebase --abort")}</button>
+      </div>
+      {remotePreview ? (
+        <div className="remote-preview-box">
+          <div className="remote-preview-box__truth">
+            <div><strong>Operation</strong><span>{remotePreview.operation}</span></div>
+            <div><strong>Branch</strong><span>{remotePreview.branch}</span></div>
+            <div><strong>Upstream</strong><span>{remotePreview.upstream || "none"}</span></div>
+            <div><strong>Ahead / behind</strong><span>+{remotePreview.ahead} / -{remotePreview.behind}</span></div>
+          </div>
+          <div className="remote-preview-box__message"><strong>Consequence</strong><span>{remotePreview.consequence}</span></div>
+          <div className="remote-preview-box__warning"><strong>Warning</strong><span>{remotePreview.warning}</span></div>
+          <div className="remote-merge-safety">
+            <strong>{remotePreview.merge_safety.classification}</strong>
+            <p>{remotePreview.merge_safety.summary}</p>
+            <p>{remotePreview.merge_safety.warning}</p>
+            <div className={`merge-risk merge-risk--${remotePreview.merge_safety.risk_level.toLowerCase()}`}>RISK: {remotePreview.merge_safety.risk_level}</div>
+          </div>
+          <div className={`remote-safety-gate remote-safety-gate--${remotePreview.merge_safety.risk_level.toLowerCase()}`}>
+            <strong>{remoteSafetyGateTitle(remotePreview)}</strong>
+            <span>{remoteSafetyGateText(remotePreview)}</span>
+            {remotePreview.operation === "upload_snapshots_preview" ? (
+              <em>{isUploadPreviewArmed(remotePreview) ? "Preview acknowledged. Execute push is available." : "Acknowledge preview first. No push happens yet."}</em>
+            ) : null}
+            <button disabled={uiExplainBusy || !llmModel} onClick={() => explainUiContext({
+              kind: "remote",
+              title: "Explain remote preview",
+              plainText: `${remotePreview.consequence}\n${remotePreview.warning}`,
+              rawTruth: JSON.stringify(remotePreview, null, 2),
+            })}>{ui(beginnerMode, "Ask LLM", "explain_context")}</button>
+            <button
+              className={remotePreview.merge_safety.risk_level === "HIGH" ? "danger-button" : ""}
+              onClick={() => {
+                const preview = remotePreview;
+                const uploadArmed = isUploadPreviewArmed(preview);
+                setConfirmAction({
+                  title: preview.operation === "upload_snapshots_preview" && uploadArmed ? "Execute push: final confirmation" : guardedRemoteActionTitle(preview),
+                  body: preview.operation === "upload_snapshots_preview" && uploadArmed
+                    ? "This will upload local snapshots to the configured remote.\n\nChronoGit will not force push."
+                    : guardedRemoteActionBody(preview),
+                  confirmLabel: preview.operation === "upload_snapshots_preview" && uploadArmed
+                    ? ui(beginnerMode, "Execute upload", "git push")
+                    : preview.operation === "upload_snapshots_preview"
+                      ? ui(beginnerMode, "Acknowledge preview only", "ack preview")
+                      : guardedRemoteActionLabel(preview),
+                  danger: preview.merge_safety.risk_level === "HIGH",
+                  requiredText: preview.merge_safety.risk_level === "HIGH" ? "override" : undefined,
+                  requiredTextLabel: preview.merge_safety.risk_level === "HIGH" ? "Type override to intentionally continue despite HIGH risk." : undefined,
+                  action: async () => {
+                    if (preview.operation === "download_updates_preview") {
+                      await executePullRebase(preview);
+                      return;
+                    }
+                    if (!uploadArmed) {
+                      const key = [preview.operation, preview.branch, preview.upstream || "none", preview.ahead, preview.behind, preview.commit_count, preview.changed_files.map((file) => `${file.status}:${file.path}`).join("|")].join("::");
+                      setArmedRemoteUploadKey(key);
+                      setLastAction("Upload preview acknowledged. No push executed.");
+                      setMessage("Upload preview acknowledged. Execute push is now available for this exact preview.");
+                      return;
+                    }
+                    await executePush(preview);
+                  },
+                });
+                setConfirmText("");
+              }}
+            >
+              {remotePreview.operation === "upload_snapshots_preview" && isUploadPreviewArmed(remotePreview)
+                ? ui(beginnerMode, "Execute upload", "git push")
+                : remotePreview.operation === "upload_snapshots_preview"
+                  ? ui(beginnerMode, "Acknowledge preview only", "ack preview")
+                  : ui(beginnerMode, "Confirm download intention", "git pull --rebase --autostash")}
+            </button>
+          </div>
+          <div className="remote-preview-columns">
+            <div><h3>Snapshots ({remotePreview.commit_count})</h3>{remotePreview.commits.map((commit) => <code key={commit}>{commit}</code>)}</div>
+            <div><h3>Files ({remotePreview.changed_files.length})</h3>{remotePreview.changed_files.map((file) => <code key={`${file.status}-${file.path}`}>{file.status} {file.path}</code>)}</div>
+          </div>
+        </div>
+      ) : <p>No remote preview loaded.</p>}
+    </div>
+  );
+}
+
+function TimeMachinePanel({
+  repoPath,
+  refreshTick,
+  beginnerMode,
+  llmModel,
+  appendLlmEntry,
+  setConfirmAction,
+}: {
+  repoPath: string;
+  refreshTick: number;
+  beginnerMode: boolean;
+  llmModel: string;
+  appendLlmEntry: (entry: Omit<LlmLogEntry, "id" | "timestamp">) => void;
+  setConfirmAction: (action: ConfirmAction | null) => void;
+}) {
+  const [history, setHistory] = useState<HistoryCommit[]>([]);
+  const [selected, setSelected] = useState<HistoryCommit | null>(null);
+  const [changedFiles, setChangedFiles] = useState<ChangedFile[]>([]);
+  const [selectedFile, setSelectedFile] = useState<ChangedFile | null>(null);
+  const [diff, setDiff] = useState("");
+  const [compareBase, setCompareBase] = useState<HistoryCommit | null>(null);
+  const [comparison, setComparison] = useState<CommitComparison | null>(null);
+  const [selectedDiffLines, setSelectedDiffLines] = useState<Set<number>>(new Set());
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    void loadHistory();
+  }, [refreshTick, repoPath]);
+
+  async function loadHistory() {
+    try {
+      const result = await invoke<HistoryCommit[]>("git_history", { repoPath });
+      setHistory(result);
+      setError("");
+      if (result.length && !selected) await selectSnapshot(result[0]);
+    } catch (err) {
+      setError(`History failed: ${err}`);
+    }
+  }
+
+  async function selectSnapshot(commit: HistoryCommit) {
+    try {
+      setSelected(commit);
+      setSelectedFile(null);
+      setComparison(null);
+      setSelectedDiffLines(new Set());
+      setDiff("Select a changed file to view its diff, or choose A ↔ B comparison.");
+      const files = await invoke<ChangedFile[]>("git_changed_files_from_commit", { repoPath, commitHash: commit.hash });
+      setChangedFiles(files);
+      setError("");
+    } catch (err) {
+      setChangedFiles([]);
+      setDiff("");
+      setError(`Changed-file list failed: ${err}`);
+    }
+  }
+
+  async function selectFile(file: ChangedFile) {
+    if (!selected) return;
+    try {
+      setSelectedFile(file);
+      setComparison(null);
+      setSelectedDiffLines(new Set());
+      setDiff("Loading file diff...");
+      const result = await invoke<DiffResult>("git_diff_file_from_commit", { repoPath, commitHash: selected.hash, path: file.path });
+      setDiff(result.diff.trim() || "No diff for this file.");
+      setError("");
+    } catch (err) {
+      setDiff("");
+      setError(`File diff failed: ${err}`);
+    }
+  }
+
+  async function compareToSelected() {
+    if (!compareBase || !selected || compareBase.hash === selected.hash) return;
+    try {
+      setSelectedFile(null);
+      setSelectedDiffLines(new Set());
+      setDiff("Loading A ↔ B comparison...");
+      const result = await invoke<CommitComparison>("git_compare_commits", { repoPath, leftCommit: compareBase.hash, rightCommit: selected.hash });
+      setComparison(result);
+      setDiff(result.diff.trim() || "No diff between these two snapshots.");
+      setError("");
+    } catch (err) {
+      setComparison(null);
+      setDiff("");
+      setError(`A ↔ B comparison failed: ${err}`);
+    }
+  }
+
+  function toggleLine(lineNumber: number) {
+    setSelectedDiffLines((current) => {
+      const next = new Set(current);
+      if (next.has(lineNumber)) next.delete(lineNumber);
+      else next.add(lineNumber);
+      return next;
+    });
+  }
+
+  function selectedDiffText() {
+    if (!diff.trim() || selectedDiffLines.size === 0) return "";
+    const lines = diff.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+    return [...selectedDiffLines].sort((a, b) => a - b).map((line) => `${line}: ${lines[line - 1] ?? ""}`).join("\n");
+  }
+
+  async function explainCurrentDiff() {
+    if (!llmModel || !diff.trim()) return;
+    try {
+      setBusy(true);
+      const title = comparison
+        ? `A ↔ B comparison: ${comparison.left_label} → ${comparison.right_label}`
+        : selectedFile
+          ? `Diff explanation: ${selectedFile.path}`
+          : "Diff explanation";
+      const result = await invoke<ExplainDiffResult>("explain_diff_with_ollama", {
+        model: llmModel,
+        diff: selectedDiffText() || diff,
+        filePath: selectedFile?.path || "comparison.patch",
+        commitHash: selected?.short_hash || "unknown",
+        commitMessage: title,
+      });
+      appendLlmEntry({ source: "diff", model: result.model, title, content: result.explanation || "Local LLM returned an empty explanation." });
+      setError("");
+    } catch (err) {
+      setError(`Local LLM explanation failed: ${err}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function restoreSelectedFile() {
+    if (!selected || !selectedFile) return;
+    const snapshot = selected;
+    const file = selectedFile;
+    setConfirmAction({
+      title: "Restore file from old snapshot",
+      body: `This restores one file from an older snapshot into your working folder.\n\nFile:\n${file.path}\n\nSnapshot:\n${snapshot.short_hash} — ${snapshot.message}`,
+      confirmLabel: ui(beginnerMode, "Restore file from snapshot", "git restore --source"),
+      danger: true,
+      action: async () => {
+        try {
+          const result = await invoke<string>("git_restore_file_from_commit", { repoPath, commitHash: snapshot.hash, path: file.path });
+          setDiff(`${result}\n\nThe file has been restored into your working folder. Review it before committing.`);
+          setError("");
+        } catch (err) {
+          setError(`Restore from snapshot failed: ${err}`);
+        }
+      },
+    });
+  }
+
+  return (
+    <div className="timeline-panel">
+      <div className="timeline-header">
+        <div>
+          <h2>{ui(beginnerMode, "Time Machine", "git log / git diff")}</h2>
+          <p>{ui(beginnerMode, "Pick a snapshot, then inspect files and diffs.", "Select commits and inspect patches.")}</p>
+        </div>
+        <button onClick={loadHistory}>{ui(beginnerMode, "Refresh history", "git log")}</button>
+      </div>
+      {error ? <div className="message">{error}</div> : null}
+      <div className="focus-surface">
+        <strong>{comparison ? "A ↔ B comparison" : selectedFile ? selectedFile.path : selected ? `${selected.short_hash} — ${selected.message}` : "No focused inspection"}</strong>
+        <div className="focus-surface__actions">
+          <button disabled={!selected} onClick={() => setCompareBase(selected)}>{ui(beginnerMode, "Use this as snapshot A", "Set A")}</button>
+          <button disabled={!compareBase || !selected || compareBase.hash === selected.hash} onClick={compareToSelected}>{ui(beginnerMode, "Compare selected as snapshot B", "Compare A → B")}</button>
+          <button disabled={!compareBase && !comparison} onClick={() => { setCompareBase(null); setComparison(null); }}>{ui(beginnerMode, "Clear comparison", "Clear A/B")}</button>
+        </div>
+      </div>
+      <div className="timeline-layout timeline-layout--three">
+        <div className="timeline-list">
+          {history.map((commit) => (
+            <button key={commit.hash} className={selected?.hash === commit.hash ? "timeline-commit timeline-commit--selected" : "timeline-commit"} onClick={() => selectSnapshot(commit)}>
+              <span className="timeline-hash">{commit.short_hash}</span>
+              <span className="timeline-message">{commit.message}</span>
+              <span className="timeline-meta">{commit.author} · {commit.timestamp}</span>
+            </button>
+          ))}
+        </div>
+        <div className="timeline-files">
+          <div className="diff-title">{selected ? `Changed files in ${selected.short_hash}` : "Changed files"}</div>
+          {changedFiles.length ? changedFiles.map((file) => (
+            <button key={`${file.status}-${file.path}`} className={selectedFile?.path === file.path ? "timeline-file timeline-file--selected" : "timeline-file"} onClick={() => selectFile(file)}>
+              <span>{file.status}</span><strong>{file.path}</strong>
+            </button>
+          )) : <div className="timeline-empty">Select a snapshot first.</div>}
+        </div>
+        <div className="diff-viewer">
+          <div className="diff-title">{comparison ? `${comparison.left_label} → ${comparison.right_label}` : selectedFile ? selectedFile.path : "No file selected"}</div>
+          <div className="diff-actions">
+            <button disabled={busy || !diff.trim()} onClick={explainCurrentDiff}>{ui(beginnerMode, "Ask LLM to explain diff", "explain_diff_with_ollama")}</button>
+            <button disabled={selectedDiffLines.size === 0} onClick={() => navigator.clipboard.writeText(selectedDiffText())}>{ui(beginnerMode, `Copy selected lines (${selectedDiffLines.size})`, "copy selected patch")}</button>
+            <button disabled={!selectedFile} className="danger-button" onClick={restoreSelectedFile}>{ui(beginnerMode, "Restore this file from selected snapshot", "git restore --source")}</button>
+          </div>
+          {renderPrettyDiff(diff, selectedDiffLines, toggleLine)}
+        </div>
+      </div>
+    </div>
   );
 }

@@ -115,3 +115,23 @@
     justify-content: flex-start;
   }
 }
+
+
+/* Persistent shell brand logo */
+.chronogit-shell__identity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.chronogit-shell__logo {
+  width: 92px;
+  height: 38px;
+  object-fit: contain;
+  flex: 0 0 auto;
+  filter: drop-shadow(0 0 12px rgba(100, 240, 200, 0.18));
+}
+
+.chronogit-shell__identity-text {
+  min-width: 0;
+}

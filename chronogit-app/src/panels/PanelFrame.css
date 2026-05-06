@@ -1,0 +1,187 @@
+.chronogit-panel-frame {
+  position: relative;
+  min-width: 280px;
+  min-height: 180px;
+  border: 1px solid rgba(100, 240, 200, 0.18);
+  border-radius: 13px;
+  background:
+    radial-gradient(circle at top left, rgba(100, 240, 200, 0.045), transparent 22rem),
+    rgba(0, 0, 0, 0.18);
+  overflow: auto;
+  resize: both;
+}
+
+.chronogit-panel-frame--compact {
+  grid-column: span 1;
+}
+
+.chronogit-panel-frame--half {
+  grid-column: span 2;
+}
+
+.chronogit-panel-frame--wide {
+  grid-column: span 3;
+}
+
+.chronogit-panel-frame--full {
+  grid-column: 1 / -1;
+}
+
+.chronogit-panel-frame__header {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  background: rgba(7, 16, 20, 0.96);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.chronogit-panel-frame__titleblock {
+  min-width: 0;
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.chronogit-panel-frame__titleblock h2 {
+  margin: 0 0 3px;
+  font-size: 13px;
+}
+
+.chronogit-panel-frame__titleblock span {
+  display: block;
+  color: #8f9aae;
+  font-size: 10px;
+  line-height: 1.3;
+}
+
+.chronogit-panel-frame__controls {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.chronogit-panel-frame__controls label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #8f9aae;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.chronogit-panel-frame__controls select {
+  color-scheme: dark;
+  background: #071014;
+  color: #dfffee;
+  border: 1px solid rgba(100, 240, 200, 0.28);
+  border-radius: 6px;
+  padding: 3px 6px;
+  font-size: 10px;
+}
+
+.chronogit-panel-frame__body {
+  padding: 8px;
+}
+
+.chronogit-panel-frame--full > .chronogit-panel-frame__body {
+  padding: 0;
+}
+
+@media (max-width: 1200px) {
+  .chronogit-panel-frame,
+  .chronogit-panel-frame--compact,
+  .chronogit-panel-frame--half,
+  .chronogit-panel-frame--wide,
+  .chronogit-panel-frame--full {
+    grid-column: 1 / -1;
+  }
+}
+
+
+.chronogit-panel-frame::after {
+  content: "↘";
+  position: absolute;
+  right: 8px;
+  bottom: 5px;
+  color: rgba(100, 240, 200, 0.55);
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.chronogit-panel-frame__controls button {
+  min-width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 999px;
+  border-color: rgba(255, 128, 128, 0.34);
+  background: rgba(255, 80, 80, 0.10);
+  color: #ffb3b3;
+  font-weight: 900;
+}
+
+
+.chronogit-panel-frame__drag-handle {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  border: 1px solid rgba(100, 240, 200, 0.24);
+  background: rgba(100, 240, 200, 0.075);
+  color: #64f0c8;
+  cursor: grab;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.chronogit-panel-frame:active .chronogit-panel-frame__drag-handle {
+  cursor: grabbing;
+}
+
+.chronogit-panel-frame--dragging {
+  opacity: 0.45;
+  transform: scale(0.985);
+  border-style: dashed;
+}
+
+.chronogit-panel-frame--drop-target {
+  border-color: rgba(255, 214, 128, 0.72);
+  background:
+    radial-gradient(circle at top left, rgba(255, 214, 128, 0.12), transparent 22rem),
+    rgba(0, 0, 0, 0.22);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 214, 128, 0.18),
+    0 0 22px rgba(255, 214, 128, 0.10);
+  transform: translateY(-2px);
+}
+
+.chronogit-panel-frame--drop-target::before {
+  content: "Drop to snap here";
+  position: absolute;
+  right: 10px;
+  top: 42px;
+  z-index: 4;
+  padding: 3px 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 214, 128, 0.36);
+  background: rgba(7, 16, 20, 0.94);
+  color: #ffd680;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+
+/* Native resize remains available; size selector is the deterministic snap layer. */
+.chronogit-panel-frame__controls select {
+  cursor: pointer;
+}
