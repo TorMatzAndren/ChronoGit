@@ -5,8 +5,9 @@ import "./App.css";
 import jarriLogo from "./assets/jarri-logo.png";
 import { PANEL_REGISTRY } from "./panels/panelRegistry";
 import { LlmLogPanel } from "./panels/LlmLogPanel";
+import { SystemLogPanel } from "./panels/SystemLogPanel";
 import type { PanelInstance, PanelType, WorkspaceTab } from "./core/chronogitWorkspaceTypes";
-import type { LlmLogEntry } from "./core/chronogitRuntimeTypes";
+import type { LlmLogEntry, SystemLogEntry } from "./core/chronogitRuntimeTypes";
 import { diffLineClass } from "./lib/diffUtils";
 
 type FileChange = {
@@ -171,14 +172,6 @@ type ConfirmAction = {
   action: () => Promise<void>;
   requiredText?: string;
   requiredTextLabel?: string;
-};
-
-type SystemLogEntry = {
-  id: string;
-  date: string;
-  time: string;
-  level: "info" | "warning" | "error" | "action";
-  message: string;
 };
 
 type LlmStreamEvent = {
@@ -1476,16 +1469,11 @@ ${context.rawTruth.slice(0, 12000)}`;
 
     if (panel.type === "system-log") {
       return (
-        <div className="cg-panel-content">
-          {systemLog.length ? systemLog.map((entry) => (
-            <article className={`system-log-entry system-log-entry--${entry.level}`} key={entry.id}>
-              <strong>{entry.level}</strong>
-              <span>{entry.date} {entry.time}</span>
-              <p>{entry.message}</p>
-              <button onClick={() => navigator.clipboard.writeText(entry.message)}>{ui(state.beginnerMode, "Copy", "clipboard.writeText")}</button>
-            </article>
-          )) : <p>No system log events yet.</p>}
-        </div>
+        <SystemLogPanel
+          beginnerMode={state.beginnerMode}
+          systemLog={systemLog}
+          ui={ui}
+        />
       );
     }
 

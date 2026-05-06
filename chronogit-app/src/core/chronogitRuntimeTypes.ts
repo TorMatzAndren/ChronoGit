@@ -4,6 +4,14 @@ export type RepoInfo = {
   root: string;
 };
 
+export type SystemLogEntry = {
+  id: string;
+  date: string;
+  time: string;
+  level: "info" | "warning" | "error" | "action";
+  message: string;
+};
+
 export type LlmLogEntry = {
   id: string;
   timestamp: string;
