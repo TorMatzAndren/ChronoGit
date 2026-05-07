@@ -5,6 +5,7 @@ type Props = {
   llmLog: LlmLogEntry[];
   toggleLlmEntry: (id: string) => void;
   clearLlmLog: () => void;
+  backupAndClearLlmLog: () => void;
   ui: (beginnerMode: boolean, beginner: string, pro: string) => string;
 };
 
@@ -13,11 +14,15 @@ export function LlmLogPanel({
   llmLog,
   toggleLlmEntry,
   clearLlmLog,
+  backupAndClearLlmLog,
   ui,
 }: Props) {
   return (
     <div className="cg-panel-content cg-llm-log-panel">
       <div className="cg-action-row">
+        <button disabled={!llmLog.length} onClick={backupAndClearLlmLog}>
+          {ui(beginnerMode, "Backup log file + clear", "export log + clear")}
+        </button>
         <button disabled={!llmLog.length} onClick={clearLlmLog}>
           {ui(beginnerMode, "Clear LLM log", "clear llm log")}
         </button>

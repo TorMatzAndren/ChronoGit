@@ -7,6 +7,17 @@ import { RepoDropdown } from "./components/RepoDropdown";
 import { PanelDropdown } from "./components/PanelDropdown";
 import { SnapshotPreflightModal } from "./components/SnapshotPreflightModal";
 import { ConfirmModal } from "./components/ConfirmModal";
+
+import {
+  abortRebase as abortRebaseRuntime,
+  confirmSnapshot as confirmSnapshotRuntime,
+  executeFileAction as executeFileActionRuntime,
+  executePullRebase as executePullRebaseRuntime,
+  executePush as executePushRuntime,
+  fetchRemoteKnowledge as fetchRemoteKnowledgeRuntime,
+  loadRemotePreview as loadRemotePreviewRuntime,
+  openSnapshotPreflight as openSnapshotPreflightRuntime,
+} from "./core/gitActions";
 import { LlmLogPanel } from "./panels/LlmLogPanel";
 import { SystemLogPanel } from "./panels/SystemLogPanel";
 import { NotesPanel } from "./panels/NotesPanel";
@@ -23,9 +34,14 @@ import {
   normalizeState,
   snap,
 } from "./core/workspaceLayout";
+
+import {
+  backupLlmLog,
+  loadLlmLog,
+  saveLlmLog,
+} from "./core/persistence";
 import type {
   CommitPreflight,
-  CommitResult,
   ConfirmAction,
   ExplainContext,
   ExplainDiffResult,
@@ -36,8 +52,6 @@ import type {
   LlmStreamEvent,
   LocalModel,
   RemoteOperationPreview,
-  RemotePullResult,
-  RemotePushResult,
   RepoInfo,
   SystemLogEntry,
 } from "./core/chronogitRuntimeTypes";
@@ -167,7 +181,7 @@ export default function App() {
   const [llmModel, setLlmModel] = useState("qwen3:8b");
   const [message, setMessage] = useState("");
   const [systemLog, setSystemLog] = useState<SystemLogEntry[]>([]);
-  const [llmLog, setLlmLog] = useState<LlmLogEntry[]>([]);
+  const [llmLog, setLlmLog] = useState<LlmLogEntry[]>(() => loadLlmLog());
   const [selectedPanelType, setSelectedPanelType] = useState<PanelType>("current-state");
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
   const [confirmText, setConfirmText] = useState("");
@@ -194,6 +208,10 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   }, [state]);
+
+  useEffect(() => {
+    saveLlmLog(llmLog);
+  }, [llmLog]);
 
   useEffect(() => {
     void initialLoad();
@@ -544,7 +562,12 @@ ${context.rawTruth.slice(0, 12000)}`;
     try {
       setBusyPath(path);
       setMessage("");
-      const result = await invoke<string>(action, { repoPath: state.repoPath, path });
+      const result =
+        await executeFileActionRuntime(
+          state.repoPath,
+          action,
+          path,
+        );
       setMessage(result);
       setLastAction(`${result}.`);
       appendSystemLog("action", result);
@@ -576,7 +599,10 @@ ${context.rawTruth.slice(0, 12000)}`;
   async function openSnapshotPreflight() {
     try {
       setMessage("");
-      const result = await invoke<CommitPreflight>("git_commit_preflight", { repoPath: state.repoPath });
+      const result =
+        await openSnapshotPreflightRuntime(
+          state.repoPath,
+        );
       setCommitPreflight(result);
       setShowPreflight(true);
     } catch (err) {
@@ -587,7 +613,11 @@ ${context.rawTruth.slice(0, 12000)}`;
 
   async function confirmSnapshot() {
     try {
-      const result = await invoke<CommitResult>("git_commit", { repoPath: state.repoPath, message: commitMessage });
+      const result =
+        await confirmSnapshotRuntime(
+          state.repoPath,
+          commitMessage,
+        );
       setMessage(result.message);
       setLastAction(`${result.message}. This snapshot is local until pushed.`);
       appendSystemLog(result.ok ? "action" : "error", result.message);
@@ -619,7 +649,10 @@ ${context.rawTruth.slice(0, 12000)}`;
   async function fetchRemoteKnowledge() {
     try {
       setRemoteBusy("fetch");
-      const result = await invoke<string>("git_fetch_remote", { repoPath: state.repoPath });
+      const result =
+        await fetchRemoteKnowledgeRuntime(
+          state.repoPath,
+        );
       setMessage(result);
       setLastAction(`${result} This updated remote-tracking knowledge only.`);
       appendSystemLog("action", result);
@@ -635,8 +668,11 @@ ${context.rawTruth.slice(0, 12000)}`;
   async function loadRemotePreview(kind: "push" | "pull") {
     try {
       setRemoteBusy(kind);
-      const command = kind === "push" ? "git_push_preview" : "git_pull_preview";
-      const result = await invoke<RemoteOperationPreview>(command, { repoPath: state.repoPath });
+      const result =
+        await loadRemotePreviewRuntime(
+          state.repoPath,
+          kind,
+        );
       setRemotePreview(result);
       setArmedRemoteUploadKey("");
       appendSystemLog("info", `${kind === "push" ? "Upload" : "Download"} preview loaded.`);
@@ -652,7 +688,11 @@ ${context.rawTruth.slice(0, 12000)}`;
   async function executePush(preview: RemoteOperationPreview) {
     try {
       setRemoteBusy("push_execute");
-      const result = await invoke<RemotePushResult>("git_push_execute", { repoPath: state.repoPath, overrideToken: guardedRemoteToken(preview) });
+      const result =
+        await executePushRuntime(
+          state.repoPath,
+          guardedRemoteToken(preview),
+        );
       setRemotePreview(null);
       setArmedRemoteUploadKey("");
       setMessage(`${result.message}${result.stderr ? ` stderr: ${result.stderr}` : ""}`);
@@ -670,7 +710,11 @@ ${context.rawTruth.slice(0, 12000)}`;
   async function executePullRebase(preview: RemoteOperationPreview) {
     try {
       setRemoteBusy("pull_execute");
-      const result = await invoke<RemotePullResult>("git_pull_rebase_execute", { repoPath: state.repoPath, overrideToken: guardedRemoteToken(preview) });
+      const result =
+        await executePullRebaseRuntime(
+          state.repoPath,
+          guardedRemoteToken(preview),
+        );
       setRemotePreview(null);
       setMessage(`${result.message}${result.stderr ? ` stderr: ${result.stderr}` : ""}`);
       setLastAction(result.message);
@@ -687,7 +731,10 @@ ${context.rawTruth.slice(0, 12000)}`;
   async function abortRebase() {
     try {
       setRemoteBusy("abort_rebase");
-      const result = await invoke<string>("git_rebase_abort", { repoPath: state.repoPath });
+      const result =
+        await abortRebaseRuntime(
+          state.repoPath,
+        );
       setRemotePreview(null);
       setArmedRemoteUploadKey("");
       setMessage(result);
@@ -830,6 +877,10 @@ ${context.rawTruth.slice(0, 12000)}`;
           llmLog={llmLog}
           toggleLlmEntry={toggleLlmEntry}
           clearLlmLog={() => setLlmLog([])}
+          backupAndClearLlmLog={() => {
+            backupLlmLog(llmLog);
+            setLlmLog([]);
+          }}
           ui={ui}
         />
       );
