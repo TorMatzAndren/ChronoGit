@@ -13,6 +13,7 @@ export const PANEL_REGISTRY: PanelDefinition[] = [
   { type: "time-machine", title: "Time Machine", description: "History, file diffs, A/B comparison, restore." },
   { type: "remote-actions", title: "Remote Actions", description: "Fetch, push/pull preview, guarded sync." },
   { type: "remote-status", title: "Remote Status", description: "Ahead/behind and upstream truth." },
+  { type: "branches", title: "Branches", description: "Read-only branch timelines and upstream truth." },
   { type: "local-llm", title: "Local LLM", description: "Local model selector and explanation controls." },
   { type: "system-log", title: "System Log", description: "Deterministic session events." },
   { type: "llm-log", title: "LLM Log", description: "Advisory local LLM responses." },

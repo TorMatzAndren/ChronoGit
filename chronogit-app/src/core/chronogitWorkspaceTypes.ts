@@ -2,6 +2,7 @@ export type PanelType =
   | "repository"
   | "git-status"
   | "remote-status"
+  | "branches"
   | "local-llm"
   | "current-state"
   | "commit-preflight"

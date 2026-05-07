@@ -26,6 +26,7 @@ import { CommitPreflightPanel } from "./panels/CommitPreflightPanel";
 import { ChangeListsPanel } from "./panels/ChangeListsPanel";
 import { RemoteStatusPanel } from "./panels/RemoteStatusPanel";
 import { RemoteActionsPanel } from "./panels/RemoteActionsPanel";
+import { BranchPanel } from "./panels/BranchPanel";
 import { LocalLlmPanel } from "./panels/LocalLlmPanel";
 import { TimeMachinePanel } from "./panels/TimeMachinePanel";
 import type { PanelInstance, PanelType, WorkspaceTab } from "./core/chronogitWorkspaceTypes";
@@ -49,6 +50,7 @@ import type {
   ConfirmAction,
   ExplainContext,
   ExplainDiffResult,
+  BranchOverview,
   GitOperationState,
   GitRemoteStatus,
   GitStatusResponse,
@@ -179,6 +181,7 @@ export default function App() {
   const [data, setData] = useState<GitStatusResponse | null>(null);
   const [repos, setRepos] = useState<RepoInfo[]>([]);
   const [remote, setRemote] = useState<GitRemoteStatus | null>(null);
+  const [branchOverview, setBranchOverview] = useState<BranchOverview | null>(null);
   const [operationState, setOperationState] = useState<GitOperationState | null>(null);
   const [localModels, setLocalModels] = useState<LocalModel[]>([]);
   const [llmEngine, setLlmEngine] = useState("ollama");
@@ -255,7 +258,7 @@ export default function App() {
   }, [state.repoPath, busyPath, remoteBusy, confirmAction, showPreflight]);
 
   async function initialLoad() {
-    await Promise.allSettled([detectGit(), refresh(), loadRepos(), loadLocalModels()]);
+    await Promise.allSettled([detectGit(), refresh(), loadRepos(), loadLocalModels(), loadBranchOverview()]);
   }
 
   function appendSystemLog(level: SystemLogEntry["level"], text: string) {
@@ -392,6 +395,7 @@ export default function App() {
       setData(statusResult);
       setRemote(remoteResult);
       setOperationState(operationResult);
+      void loadBranchOverview(repoPath);
       lastKnownStateSignatureRef.current = JSON.stringify({ statusResult, remoteResult, operationResult });
       appendSystemLog("info", "Refreshed Git status.");
       setHistoryRefreshTick((value) => value + 1);
@@ -407,6 +411,32 @@ export default function App() {
     } catch (err) {
       setMessage(`Repository scan failed: ${err}`);
       appendSystemLog("error", `Repository scan failed: ${err}`);
+    }
+  }
+
+  async function loadBranchOverview(repoPath = state.repoPath) {
+    try {
+      setBranchOverview(await invoke<BranchOverview>("git_branch_overview", { repoPath }));
+    } catch (err) {
+      setBranchOverview(null);
+      appendSystemLog("warning", `Branch overview failed: ${err}`);
+    }
+  }
+
+  async function createBranch(branchName: string) {
+    try {
+      const result = await invoke<string>("git_create_branch", {
+        repoPath: state.repoPath,
+        branchName,
+      });
+
+      setMessage(result);
+      setLastAction(result);
+      appendSystemLog("action", result);
+      await loadBranchOverview();
+    } catch (err) {
+      setMessage(`Create branch failed: ${err}`);
+      appendSystemLog("error", `Create branch failed: ${err}`);
     }
   }
 
@@ -831,6 +861,18 @@ ${context.rawTruth.slice(0, 12000)}`;
           llmModel={llmModel}
           runFileAction={runFileAction}
           explainUiContext={explainUiContext}
+          ui={ui}
+        />
+      );
+    }
+
+    if (panel.type === "branches") {
+      return (
+        <BranchPanel
+          beginnerMode={state.beginnerMode}
+          branchOverview={branchOverview}
+          loadBranchOverview={() => loadBranchOverview()}
+          createBranch={createBranch}
           ui={ui}
         />
       );

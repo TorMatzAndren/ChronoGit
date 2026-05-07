@@ -214,3 +214,22 @@ export type LlmLogEntry = {
   streaming?: boolean;
   collapsed?: boolean;
 };
+
+export type BranchInfo = {
+  name: string;
+  full_name: string;
+  short_hash: string;
+  upstream: string | null;
+  ahead: number;
+  behind: number;
+  is_current: boolean;
+  is_remote: boolean;
+  is_detached: boolean;
+};
+
+export type BranchOverview = {
+  current_branch: string;
+  detached_head: boolean;
+  local_branches: BranchInfo[];
+  remote_branches: BranchInfo[];
+};

@@ -35,6 +35,27 @@ struct GitRemoteStatus {
 }
 
 #[derive(Serialize)]
+struct BranchInfo {
+    name: String,
+    full_name: String,
+    short_hash: String,
+    upstream: Option<String>,
+    ahead: u32,
+    behind: u32,
+    is_current: bool,
+    is_remote: bool,
+    is_detached: bool,
+}
+
+#[derive(Serialize)]
+struct BranchOverview {
+    current_branch: String,
+    detached_head: bool,
+    local_branches: Vec<BranchInfo>,
+    remote_branches: Vec<BranchInfo>,
+}
+
+#[derive(Serialize)]
 struct GitOperationState {
     rebase_in_progress: bool,
     merge_in_progress: bool,
@@ -465,6 +486,213 @@ fn parse_remote_counts(status_line: &str) -> (u32, u32) {
     }
 
     (ahead, behind)
+}
+
+fn parse_branch_ahead_behind(value: &str) -> (u32, u32) {
+    let mut ahead = 0;
+    let mut behind = 0;
+
+    for part in value.split(',') {
+        let trimmed = part.trim();
+
+        if let Some(raw) = trimmed.strip_prefix("ahead ") {
+            ahead = raw.parse::<u32>().unwrap_or(0);
+        }
+
+        if let Some(raw) = trimmed.strip_prefix("behind ") {
+            behind = raw.parse::<u32>().unwrap_or(0);
+        }
+    }
+
+    (ahead, behind)
+}
+
+
+fn validate_branch_name(branch_name: &str) -> Result<String, String> {
+    let trimmed = branch_name.trim();
+
+    if trimmed.is_empty() {
+        return Err("Branch name is required.".into());
+    }
+
+    if trimmed.contains(char::is_whitespace) {
+        return Err("Branch name must not contain whitespace.".into());
+    }
+
+    if trimmed.starts_with('-') {
+        return Err("Branch name must not start with '-'.".into());
+    }
+
+    if trimmed.contains("..")
+        || trimmed.contains("//")
+        || trimmed.contains("@{")
+        || trimmed.ends_with('.')
+        || trimmed.ends_with('/')
+        || trimmed.contains('\\')
+        || trimmed.contains('~')
+        || trimmed.contains('^')
+        || trimmed.contains(':')
+        || trimmed.contains('?')
+        || trimmed.contains('*')
+        || trimmed.contains('[')
+    {
+        return Err("Branch name contains characters Git does not allow safely here.".into());
+    }
+
+    Ok(trimmed.to_string())
+}
+
+#[tauri::command]
+fn git_create_branch(repo_path: String, branch_name: String) -> Result<String, String> {
+    let branch_name = validate_branch_name(&branch_name)?;
+
+    let exists_out = Command::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .args(["show-ref", "--verify", "--quiet"])
+        .arg(format!("refs/heads/{}", branch_name))
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if exists_out.status.success() {
+        return Err(format!("Branch already exists: {}", branch_name));
+    }
+
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .args(["branch"])
+        .arg(&branch_name)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !out.status.success() {
+        return Err(command_error("git branch <name>", &out));
+    }
+
+    Ok(format!(
+        "Created branch '{}' at the current snapshot. No files were changed and checkout did not switch branches.",
+        branch_name
+    ))
+}
+
+#[tauri::command]
+fn git_branch_overview(repo_path: String) -> Result<BranchOverview, String> {
+    let current_out = Command::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .args(["branch", "--show-current"])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !current_out.status.success() {
+        return Err(command_error("git branch --show-current", &current_out));
+    }
+
+    let current_branch = String::from_utf8_lossy(&current_out.stdout).trim().to_string();
+
+    let head_out = Command::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .args(["rev-parse", "--short", "HEAD"])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    let detached_head = current_branch.is_empty();
+    let detached_hash = if head_out.status.success() {
+        String::from_utf8_lossy(&head_out.stdout).trim().to_string()
+    } else {
+        "unknown".to_string()
+    };
+
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .args([
+            "for-each-ref",
+            "--format=%(refname)|%(refname:short)|%(objectname:short)|%(upstream:short)|%(upstream:track)",
+            "refs/heads",
+            "refs/remotes",
+        ])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !out.status.success() {
+        return Err(command_error("git for-each-ref branch overview", &out));
+    }
+
+    let mut local_branches = Vec::new();
+    let mut remote_branches = Vec::new();
+
+    for line in String::from_utf8_lossy(&out.stdout).lines() {
+        let parts: Vec<&str> = line.split('|').collect();
+
+        if parts.len() < 5 {
+            continue;
+        }
+
+        let full_name = parts[0].to_string();
+        let name = parts[1].to_string();
+        let short_hash = parts[2].to_string();
+        let upstream = if parts[3].trim().is_empty() {
+            None
+        } else {
+            Some(parts[3].to_string())
+        };
+
+        let track = parts[4]
+            .trim()
+            .trim_start_matches('[')
+            .trim_end_matches(']')
+            .to_string();
+
+        let (ahead, behind) = parse_branch_ahead_behind(&track);
+        let is_remote = full_name.starts_with("refs/remotes/");
+        let is_current = !is_remote && !current_branch.is_empty() && name == current_branch;
+
+        if name.ends_with("/HEAD") {
+            continue;
+        }
+
+        let branch = BranchInfo {
+            name,
+            full_name,
+            short_hash,
+            upstream,
+            ahead,
+            behind,
+            is_current,
+            is_remote,
+            is_detached: false,
+        };
+
+        if branch.is_remote {
+            remote_branches.push(branch);
+        } else {
+            local_branches.push(branch);
+        }
+    }
+
+    if detached_head {
+        local_branches.insert(0, BranchInfo {
+            name: format!("DETACHED HEAD @ {}", detached_hash),
+            full_name: "HEAD".to_string(),
+            short_hash: detached_hash,
+            upstream: None,
+            ahead: 0,
+            behind: 0,
+            is_current: true,
+            is_remote: false,
+            is_detached: true,
+        });
+    }
+
+    Ok(BranchOverview {
+        current_branch: if detached_head { "DETACHED HEAD".to_string() } else { current_branch },
+        detached_head,
+        local_branches,
+        remote_branches,
+    })
 }
 
 #[tauri::command]
@@ -2761,6 +2989,8 @@ pub fn run() {
             open_log_backup_folder,
             discover_git_repos,
             git_remote_status,
+            git_branch_overview,
+            git_create_branch,
             git_operation_state,
             git_fetch_remote,
             git_push_preview,
