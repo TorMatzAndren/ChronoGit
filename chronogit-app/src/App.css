@@ -2840,3 +2840,12 @@ code {
 .branch-create-box input {
   min-width: 0;
 }
+
+/* CHRONOGIT_BRANCH_SWITCH_V1 */
+.branch-row {
+  grid-template-columns: minmax(150px, 1.2fr) 82px minmax(110px, 1fr) 92px auto;
+}
+
+.branch-row > button {
+  white-space: nowrap;
+}

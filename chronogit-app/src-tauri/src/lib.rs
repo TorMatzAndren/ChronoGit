@@ -577,6 +577,73 @@ fn git_create_branch(repo_path: String, branch_name: String) -> Result<String, S
 }
 
 #[tauri::command]
+fn git_switch_branch(
+    repo_path: String,
+    branch_name: String,
+) -> Result<String, String> {
+    let branch_name = validate_branch_name(&branch_name)?;
+
+    let exists_out = Command::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .args(["show-ref", "--verify", "--quiet"])
+        .arg(format!("refs/heads/{}", branch_name))
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !exists_out.status.success() {
+        return Err(format!(
+            "Branch switch blocked: branch does not exist: {}",
+            branch_name
+        ));
+    }
+
+    let status_out = Command::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .args(["status", "--porcelain=v1"])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !status_out.status.success() {
+        return Err(command_error(
+            "git status --porcelain=v1",
+            &status_out,
+        ));
+    }
+
+    if !String::from_utf8_lossy(&status_out.stdout)
+        .trim()
+        .is_empty()
+    {
+        return Err(
+            "Branch switch blocked: working tree contains uncommitted changes."
+                .into(),
+        );
+    }
+
+    let checkout_out = Command::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .args(["checkout"])
+        .arg(&branch_name)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !checkout_out.status.success() {
+        return Err(command_error(
+            "git checkout <branch>",
+            &checkout_out,
+        ));
+    }
+
+    Ok(format!(
+        "Switched active timeline to branch: {}",
+        branch_name
+    ))
+}
+
+#[tauri::command]
 fn git_branch_overview(repo_path: String) -> Result<BranchOverview, String> {
     let current_out = Command::new("git")
         .arg("-C")
@@ -2991,6 +3058,7 @@ pub fn run() {
             git_remote_status,
             git_branch_overview,
             git_create_branch,
+            git_switch_branch,
             git_operation_state,
             git_fetch_remote,
             git_push_preview,

@@ -50,6 +50,7 @@ import type {
   ConfirmAction,
   ExplainContext,
   ExplainDiffResult,
+  BranchInfo,
   BranchOverview,
   GitOperationState,
   GitRemoteStatus,
@@ -438,6 +439,44 @@ export default function App() {
       setMessage(`Create branch failed: ${err}`);
       appendSystemLog("error", `Create branch failed: ${err}`);
     }
+  }
+
+  function requestSwitchBranch(branch: BranchInfo) {
+    setConfirmAction({
+      title: "Switch active branch timeline",
+      body: [
+        "This switches ChronoGit to another local Git branch.",
+        "",
+        "Git truth:",
+        "- The active branch pointer changes.",
+        "- Visible working files may change to match that branch.",
+        "- Future commits will be created on the selected branch.",
+        "- ChronoGit blocks the switch if the working tree is dirty.",
+        "",
+        `Target branch: ${branch.name}`,
+        `Target snapshot: ${branch.short_hash}`,
+      ].join("\n"),
+      confirmLabel: ui(state.beginnerMode, "Switch timeline", "git checkout"),
+      danger: false,
+      action: async () => {
+        try {
+          const result = await invoke<string>("git_switch_branch", {
+            repoPath: state.repoPath,
+            branchName: branch.name,
+          });
+
+          setMessage(result);
+          setLastAction(result);
+          appendSystemLog("action", result);
+
+          await refresh();
+          await loadBranchOverview();
+        } catch (err) {
+          setMessage(`Switch branch failed: ${err}`);
+          appendSystemLog("error", `Switch branch failed: ${err}`);
+        }
+      },
+    });
   }
 
   async function loadLocalModels(engine = llmEngine) {
@@ -873,6 +912,7 @@ ${context.rawTruth.slice(0, 12000)}`;
           branchOverview={branchOverview}
           loadBranchOverview={() => loadBranchOverview()}
           createBranch={createBranch}
+          requestSwitchBranch={requestSwitchBranch}
           ui={ui}
         />
       );

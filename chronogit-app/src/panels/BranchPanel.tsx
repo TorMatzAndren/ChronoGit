@@ -6,6 +6,7 @@ type Props = {
   branchOverview: BranchOverview | null;
   loadBranchOverview: () => Promise<void>;
   createBranch: (branchName: string) => Promise<void>;
+  requestSwitchBranch: (branch: BranchInfo) => void;
   ui: (beginnerMode: boolean, beginner: string, pro: string) => string;
 };
 
@@ -17,7 +18,17 @@ function branchState(branch: BranchInfo) {
   return "in sync";
 }
 
-function BranchRow({ branch }: { branch: BranchInfo }) {
+function BranchRow({
+  branch,
+  requestSwitchBranch,
+  beginnerMode,
+  ui,
+}: {
+  branch: BranchInfo;
+  requestSwitchBranch: (branch: BranchInfo) => void;
+  beginnerMode: boolean;
+  ui: (beginnerMode: boolean, beginner: string, pro: string) => string;
+}) {
   return (
     <article className={branch.is_current ? "branch-row branch-row--current" : "branch-row"}>
       <div>
@@ -27,6 +38,19 @@ function BranchRow({ branch }: { branch: BranchInfo }) {
       <code>{branch.short_hash}</code>
       <span>{branch.upstream || "no upstream"}</span>
       <em>{branchState(branch)} · +{branch.ahead} / -{branch.behind}</em>
+      <button
+        disabled={branch.is_current || branch.is_remote || branch.is_detached}
+        onClick={() => requestSwitchBranch(branch)}
+        title={
+          branch.is_current
+            ? "Already on this branch."
+            : branch.is_remote
+              ? "Remote branches are read-only here. Create or checkout a local branch first."
+              : "Switch active timeline to this local branch."
+        }
+      >
+        {ui(beginnerMode, "Switch timeline", "git checkout")}
+      </button>
     </article>
   );
 }
@@ -36,6 +60,7 @@ export function BranchPanel({
   branchOverview,
   loadBranchOverview,
   createBranch,
+  requestSwitchBranch,
   ui,
 }: Props) {
   const [branchName, setBranchName] = useState("");
@@ -110,14 +135,30 @@ export function BranchPanel({
           <section className="branch-panel__section">
             <h4>Local branches ({branchOverview.local_branches.length})</h4>
             {branchOverview.local_branches.length
-              ? branchOverview.local_branches.map((branch) => <BranchRow key={branch.full_name} branch={branch} />)
+              ? branchOverview.local_branches.map((branch) => (
+                  <BranchRow
+                    key={branch.full_name}
+                    branch={branch}
+                    requestSwitchBranch={requestSwitchBranch}
+                    beginnerMode={beginnerMode}
+                    ui={ui}
+                  />
+                ))
               : <p>No local branches detected.</p>}
           </section>
 
           <section className="branch-panel__section">
             <h4>Remote branches ({branchOverview.remote_branches.length})</h4>
             {branchOverview.remote_branches.length
-              ? branchOverview.remote_branches.map((branch) => <BranchRow key={branch.full_name} branch={branch} />)
+              ? branchOverview.remote_branches.map((branch) => (
+                  <BranchRow
+                    key={branch.full_name}
+                    branch={branch}
+                    requestSwitchBranch={requestSwitchBranch}
+                    beginnerMode={beginnerMode}
+                    ui={ui}
+                  />
+                ))
               : <p>No remote branches detected.</p>}
           </section>
         </>
