@@ -3,10 +3,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import "./App.css";
 import jarriLogo from "./assets/jarri-logo.png";
-import { PANEL_REGISTRY } from "./panels/panelRegistry";
 import { RepoDropdown } from "./components/RepoDropdown";
 import { PanelDropdown } from "./components/PanelDropdown";
 import { SnapshotPreflightModal } from "./components/SnapshotPreflightModal";
+import { ConfirmModal } from "./components/ConfirmModal";
 import { LlmLogPanel } from "./panels/LlmLogPanel";
 import { SystemLogPanel } from "./panels/SystemLogPanel";
 import { NotesPanel } from "./panels/NotesPanel";
@@ -18,6 +18,11 @@ import { RemoteActionsPanel } from "./panels/RemoteActionsPanel";
 import { LocalLlmPanel } from "./panels/LocalLlmPanel";
 import { TimeMachinePanel } from "./panels/TimeMachinePanel";
 import type { PanelInstance, PanelType, WorkspaceTab } from "./core/chronogitWorkspaceTypes";
+import {
+  makePanel,
+  normalizeState,
+  snap,
+} from "./core/workspaceLayout";
 import type {
   CommitPreflight,
   CommitResult,
@@ -47,39 +52,8 @@ type AppState = {
 const STORAGE_KEY = "chronogit_workspace_state_v3";
 const OLD_STORAGE_KEY = "chronogit_workspace_state_v2";
 const DEFAULT_REPO = "/home/dretski/projects/ChronoGit";
-const GRID = 12;
-
-function snap(value: number) {
-  return Math.round(value / GRID) * GRID;
-}
-
 function ui(beginnerMode: boolean, beginner: string, pro: string) {
   return beginnerMode ? beginner : pro;
-}
-
-function titleFor(type: PanelType) {
-  return PANEL_REGISTRY.find((panel) => panel.type === type)?.title || "Panel";
-}
-
-function makePanel(type: PanelType, index = 0): PanelInstance {
-  return {
-    id: `panel-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-    type,
-    title: titleFor(type),
-    x: 24 + index * 32,
-    y: 24 + index * 32,
-    w:
-      type === "change-lists" ? 860 :
-      type === "time-machine" ? 1040 :
-      type === "remote-actions" ? 860 :
-      type === "commit-preflight" ? 520 :
-      390,
-    h:
-      type === "change-lists" ? 420 :
-      type === "time-machine" ? 620 :
-      type === "remote-actions" ? 520 :
-      240,
-  };
 }
 
 function defaultState(): AppState {
@@ -104,45 +78,11 @@ function defaultState(): AppState {
   };
 }
 
-function normalizePanel(panel: Partial<PanelInstance>, index: number): PanelInstance {
-  const type = (panel.type || "empty") as PanelType;
-  return {
-    id: String(panel.id || `panel-${Date.now()}-${index}`),
-    type,
-    title: String(panel.title || titleFor(type)),
-    x: Number.isFinite(panel.x) ? Number(panel.x) : 24 + index * 32,
-    y: Number.isFinite(panel.y) ? Number(panel.y) : 24 + index * 32,
-    w: Number.isFinite(panel.w) ? Math.max(240, Number(panel.w)) : makePanel(type, index).w,
-    h: Number.isFinite(panel.h) ? Math.max(140, Number(panel.h)) : makePanel(type, index).h,
-  };
-}
-
-function normalizeState(input: unknown): AppState {
-  if (!input || typeof input !== "object") return defaultState();
-  const raw = input as Partial<AppState>;
-  if (!Array.isArray(raw.tabs) || !raw.tabs.length) return defaultState();
-
-  const tabs = raw.tabs.map((tab, tabIndex) => ({
-    id: String(tab.id || `tab-${tabIndex}`),
-    name: String(tab.name || `Tab ${tabIndex + 1}`),
-    panels: Array.isArray(tab.panels) && tab.panels.length
-      ? tab.panels.map(normalizePanel)
-      : [makePanel("current-state")],
-  }));
-
-  return {
-    activeTabId: tabs.some((tab) => tab.id === raw.activeTabId) ? String(raw.activeTabId) : tabs[0].id,
-    beginnerMode: raw.beginnerMode !== false,
-    repoPath: String(raw.repoPath || DEFAULT_REPO),
-    tabs,
-  };
-}
-
 function loadState(): AppState {
   for (const key of [STORAGE_KEY, OLD_STORAGE_KEY]) {
     try {
       const raw = localStorage.getItem(key);
-      if (raw) return normalizeState(JSON.parse(raw));
+      if (raw) return normalizeState(JSON.parse(raw), defaultState);
     } catch {
       // fall through
     }
@@ -1005,34 +945,23 @@ ${context.rawTruth.slice(0, 12000)}`;
       ) : null}
 
       {confirmAction ? (
-        <div className="confirm-overlay">
-          <div className={`confirm-modal ${confirmAction.danger ? "confirm-modal--danger" : ""}`}>
-            <div className="confirm-modal__eyebrow">{confirmAction.danger ? "Destructive action" : "Confirmation"}</div>
-            <h2>{confirmAction.title}</h2>
-            <pre>{confirmAction.body}</pre>
-            {confirmAction.requiredText ? (
-              <label className="confirm-required-text">
-                <span>{confirmAction.requiredTextLabel || `Type ${confirmAction.requiredText} to continue.`}</span>
-                <input value={confirmText} onChange={(event) => setConfirmText(event.target.value)} placeholder={confirmAction.requiredText} />
-              </label>
-            ) : null}
-            <div className="confirm-modal__actions">
-              <button onClick={() => { setConfirmAction(null); setConfirmText(""); }}>Cancel</button>
-              <button
-                className={confirmAction.danger ? "danger-button" : "confirm"}
-                disabled={Boolean(confirmAction.requiredText && confirmText.trim() !== confirmAction.requiredText)}
-                onClick={async () => {
-                  const action = confirmAction.action;
-                  setConfirmAction(null);
-                  setConfirmText("");
-                  await action();
-                }}
-              >
-                {confirmAction.confirmLabel}
-              </button>
-            </div>
-          </div>
-        </div>
+        <ConfirmModal
+          action={confirmAction}
+          confirmText={confirmText}
+          setConfirmText={setConfirmText}
+          onCancel={() => {
+            setConfirmAction(null);
+            setConfirmText("");
+          }}
+          onConfirm={async () => {
+            const action = confirmAction.action;
+
+            setConfirmAction(null);
+            setConfirmText("");
+
+            await action();
+          }}
+        />
       ) : null}
 
       {showPreflight ? (
