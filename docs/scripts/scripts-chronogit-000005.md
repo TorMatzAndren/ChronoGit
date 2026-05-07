@@ -1,0 +1,689 @@
+Title: chronogitRuntimeTypes.ts
+ID: scripts-chronogit-000005
+Date: 2026-05-07
+Author: Matz
+Type: scripts
+Subsystem: workspace-ui
+Updated: 2026-05-07
+Revision: 1
+
+---
+
+@role:type-system
+@subsystem:workspace-ui
+@entity:script:chronogit-app/src/core/chronogitRuntimeTypes.ts
+@entity:/chronogit-app/src/core/chronogitRuntimeTypes.ts
+@semantic:runtime-types
+@semantic:backend-frontend-contract
+@semantic:git-status
+@semantic:git-remote-awareness
+@semantic:git-operation-state
+@semantic:git-mutation
+@semantic:git-branching
+@semantic:commit-preflight
+@semantic:git-temporal
+@semantic:file-lineage
+@semantic:commit-comparison
+@semantic:merge-safety-prediction
+@semantic:llm-local
+@semantic:llm-streaming
+@semantic:system-log
+@semantic:llm-log
+@semantic:confirmation-flow
+@semantic:type-contract
+@state:active
+
+# chronogitRuntimeTypes.ts
+
+**Date:** 2026-05-07  
+**Summary:** Core frontend runtime type contract definitions for ChronoGit. Defines TypeScript structures for backend Git responses, remote state, branch state, Time Machine history/diff/lineage data, commit/preflight results, LLM streaming and explanation data, confirmation actions, and persistent system/LLM logs.  
+**Keywords:** runtime types, backend frontend contract, git status, remote preview, branch overview, file lineage, time machine, llm streaming, system log, confirmation action  
+**Tags:** scripts, types, workspace-ui, git, backend-contract, runtime-state, llm, logs
+
+Core frontend runtime type contract definitions for ChronoGit.
+
+---
+
+## Purpose
+
+`chronogitRuntimeTypes.ts` defines the TypeScript runtime data contracts used by the ChronoGit frontend.
+
+It describes structured data exchanged between:
+
+- Tauri backend commands
+- React root orchestration
+- panel components
+- modal components
+- log systems
+- LLM explanation systems
+- Time Machine systems
+
+This file does not execute logic.
+
+It establishes shared structural truth for frontend runtime data.
+
+---
+
+## Architectural Role
+
+This file is the frontend runtime contract surface for ChronoGit.
+
+It mirrors and consumes backend-shaped data returned from `src-tauri/src/lib.rs`.
+
+It is part of the structured layer:
+
+Raw backend output → typed frontend runtime model → panel projection.
+
+It is not a truth extractor.
+
+It is not a mutation system.
+
+It is not a rendering system.
+
+It defines the shapes that other systems rely on.
+
+---
+
+## Repository Types
+
+### RepoInfo
+
+Defines discovered repository metadata:
+
+- `path`
+- `name`
+- `root`
+
+Used for repository discovery and repository selection surfaces.
+
+---
+
+## Git Status Types
+
+### GitStatusResponse
+
+Defines current Git status response:
+
+- `branch`
+- `staged`
+- `working`
+
+### FileChange
+
+Defines a changed file entry:
+
+- `path`
+- `index_status`
+- `worktree_status`
+- `status`
+- `risk`
+- `staged`
+- `explanation`
+
+`index_status` and `worktree_status` are optional in the frontend contract.
+
+This allows the frontend to tolerate FileChange-like structures that may not include raw status columns.
+
+---
+
+## Git Operation-State Types
+
+### GitOperationState
+
+Defines interrupted operation state:
+
+- `rebase_in_progress`
+- `merge_in_progress`
+- `cherry_pick_in_progress`
+- `revert_in_progress`
+- `conflicted_files`
+- `warning`
+
+Used to surface rebase, merge, cherry-pick, revert, and conflict conditions.
+
+---
+
+## LLM Streaming Types
+
+### LlmStreamEvent
+
+Defines streamed local LLM event chunks:
+
+- `stream_id`
+- `chunk`
+- `done`
+- `error`
+
+This corresponds to the Tauri event stream used by ChronoGit’s local LLM explanation flow.
+
+---
+
+## Commit Preflight Types
+
+### CommitPreflight
+
+Defines pre-commit/snapshot review data:
+
+- `staged_files`
+- `insertions`
+- `deletions`
+- `is_empty`
+
+Used before creating a snapshot/commit.
+
+---
+
+## Explanation Context Types
+
+### ExplainContext
+
+Defines UI/context explanation input:
+
+- `kind`
+- `title`
+- `plainText`
+- `rawTruth`
+
+This type supports advisory LLM explanations by explicitly separating visible UI text from raw deterministic truth.
+
+---
+
+## Time Machine History Types
+
+### HistoryCommit
+
+Defines commit history entries:
+
+- `hash`
+- `short_hash`
+- `author`
+- `timestamp`
+- `message`
+
+### ChangedFile
+
+Defines changed file metadata:
+
+- `path`
+- `status`
+
+### DiffResult
+
+Defines a single file diff result:
+
+- `commit_hash`
+- `path`
+- `diff`
+
+These types support ChronoGit Time Machine history and diff inspection.
+
+---
+
+## File History and Lineage Types
+
+### FileHistoryEntry
+
+Defines a single file history event:
+
+- `hash`
+- `short_hash`
+- `author`
+- `timestamp`
+- `message`
+- `status`
+- `path`
+
+### FileRenameEvent
+
+Defines a detected rename event:
+
+- `hash`
+- `old_path`
+- `new_path`
+
+### FileLineage
+
+Defines file lineage summary:
+
+- `path`
+- `commits`
+- `first_commit`
+- `last_commit`
+- `renamed`
+- `deleted`
+- `rename_events`
+
+`first_commit` and `last_commit` may be `null`.
+
+This supports lineage-aware Time Machine inspection.
+
+---
+
+## Commit Comparison Types
+
+### CommitComparison
+
+Defines A ↔ B comparison data:
+
+- `left_commit`
+- `right_commit`
+- `left_label`
+- `right_label`
+- `changed_files`
+- `insertions`
+- `deletions`
+- `diff`
+
+This type supports deterministic comparison between two selected snapshots.
+
+---
+
+## LLM Explanation Result Types
+
+### ExplainDiffResult
+
+Defines local LLM explanation output:
+
+- `model`
+- `explanation`
+- `tdp_before_watts`
+- `tdp_active_watts`
+- `tdp_reset_watts`
+
+The TDP fields are present in both streaming and non-streaming explanation result shapes, although streaming paths may use status strings rather than numeric GPU power values.
+
+---
+
+## Commit Result Types
+
+### CommitResult
+
+Defines commit/snapshot result:
+
+- `ok`
+- `message`
+- `commit_hash`
+
+Used for normal commit creation and amended snapshot message results.
+
+---
+
+## Local Model Types
+
+### LocalModel
+
+Defines local LLM model metadata:
+
+- `name`
+- `engine`
+- `size`
+- `modified_at`
+- `family`
+- `parameter_size`
+- `quantization_level`
+
+`modified_at` is optional in the frontend contract.
+
+---
+
+## Remote Awareness Types
+
+### GitRemoteStatus
+
+Defines remote tracking state:
+
+- `repo_path`
+- `branch`
+- `upstream`
+- `remote`
+- `remote_url`
+- `ahead`
+- `behind`
+- `has_remote`
+- `is_diverged`
+- `is_clean`
+
+Optional fields:
+
+- `repo_path`
+- `remote`
+- `is_clean`
+
+Nullable fields:
+
+- `upstream`
+- `remote`
+- `remote_url`
+
+This type supports remote-state projection and local/shared boundary awareness.
+
+---
+
+## Remote Execution Result Types
+
+### RemotePullResult
+
+Defines pull/rebase result:
+
+- `ok`
+- `message`
+- `stdout`
+- `stderr`
+
+### RemotePushResult
+
+Defines push result:
+
+- `ok`
+- `message`
+- `stdout`
+- `stderr`
+
+These types preserve stdout/stderr for frontend review and logging.
+
+---
+
+## Merge Safety Prediction Types
+
+### MergeSafetyPrediction
+
+Defines advisory remote merge prediction:
+
+- `classification`
+- `risk_level`
+- `summary`
+- `local_touched_files`
+- `remote_touched_files`
+- `local_files`
+- `remote_files`
+- `shared_files`
+- `working_changes`
+- `warning`
+
+This type represents predictive analysis, not authoritative Git merge truth.
+
+---
+
+## Remote Operation Preview Types
+
+### RemoteOperationPreview
+
+Defines remote push/pull preview data:
+
+- `operation`
+- `repo_path`
+- `branch`
+- `upstream`
+- `remote`
+- `ahead`
+- `behind`
+- `commit_count`
+- `commits`
+- `changed_files`
+- `consequence`
+- `warning`
+- `merge_safety`
+
+Used before executing remote mutations.
+
+---
+
+## Confirmation Flow Types
+
+### ConfirmAction
+
+Defines modal-routed confirmation actions:
+
+- `title`
+- `body`
+- `confirmLabel`
+- `danger`
+- `action`
+- `requiredText`
+- `requiredTextLabel`
+
+`action` is an async frontend callback.
+
+`requiredText` and `requiredTextLabel` are optional and support stronger confirmation flows.
+
+---
+
+## Log Types
+
+### SystemLogEntry
+
+Defines persistent system log entries:
+
+- `id`
+- `date`
+- `time`
+- `level`
+- `message`
+
+Allowed system log levels:
+
+- `info`
+- `warning`
+- `error`
+- `action`
+
+### LlmLogEntry
+
+Defines persistent LLM log entries:
+
+- `id`
+- `timestamp`
+- `source`
+- `model`
+- `title`
+- `content`
+- `streaming`
+- `collapsed`
+
+Allowed LLM log sources:
+
+- `diff`
+- `ui`
+- `remote`
+- `preflight`
+- `system_log`
+
+Optional fields:
+
+- `streaming`
+- `collapsed`
+
+---
+
+## Branch Types
+
+### BranchInfo
+
+Defines branch metadata:
+
+- `name`
+- `full_name`
+- `short_hash`
+- `upstream`
+- `ahead`
+- `behind`
+- `is_current`
+- `is_remote`
+- `is_detached`
+
+### BranchOverview
+
+Defines total branch overview state:
+
+- `current_branch`
+- `detached_head`
+- `local_branches`
+- `remote_branches`
+
+These types support ChronoGit branch awareness and branch switching UI.
+
+---
+
+## Inputs
+
+This file has no runtime inputs.
+
+It defines exported TypeScript type contracts.
+
+---
+
+## Outputs
+
+Exports runtime contracts:
+
+- `RepoInfo`
+- `GitStatusResponse`
+- `GitOperationState`
+- `LlmStreamEvent`
+- `FileChange`
+- `CommitPreflight`
+- `ExplainContext`
+- `HistoryCommit`
+- `FileHistoryEntry`
+- `FileRenameEvent`
+- `FileLineage`
+- `ChangedFile`
+- `DiffResult`
+- `CommitComparison`
+- `ExplainDiffResult`
+- `CommitResult`
+- `LocalModel`
+- `GitRemoteStatus`
+- `RemotePullResult`
+- `RemotePushResult`
+- `MergeSafetyPrediction`
+- `RemoteOperationPreview`
+- `ConfirmAction`
+- `SystemLogEntry`
+- `LlmLogEntry`
+- `BranchInfo`
+- `BranchOverview`
+
+---
+
+## Truth, Projection, Mutation, and Advisory Boundaries
+
+### Truth Surfaces
+
+This file defines frontend structural contracts for backend truth.
+
+It does not create truth by itself.
+
+### Projection Systems
+
+These types support projected panels and modals by enforcing consistent data shape.
+
+### Mutation Systems
+
+No mutation logic exists in this file.
+
+Mutation callbacks are represented structurally through `ConfirmAction`.
+
+### Preview Systems
+
+Preview structures include:
+
+- `CommitPreflight`
+- `RemoteOperationPreview`
+- `MergeSafetyPrediction`
+
+### Cognition Systems
+
+Cognition/advisory structures include:
+
+- `ExplainContext`
+- `ExplainDiffResult`
+- `LlmStreamEvent`
+- `LlmLogEntry`
+
+### Rendering Systems
+
+Panel rendering systems consume these types, but this file performs no rendering.
+
+### Safety Systems
+
+Safety-related structures include:
+
+- `ConfirmAction`
+- `GitOperationState`
+- `MergeSafetyPrediction`
+- `RemoteOperationPreview`
+- `FileChange.risk`
+
+This file defines safety data shape but does not enforce safety behavior.
+
+---
+
+## Backend/Frontend Contract Notes
+
+Many structures correspond directly to Rust structs in:
+
+- `src-tauri/src/lib.rs`
+
+Important differences visible in this frontend contract:
+
+- some frontend fields are optional even when backend structs return them
+- nullable frontend fields are represented as `string | null`
+- Rust `Option<String>` maps into TypeScript nullable fields
+- numeric Rust counts map into TypeScript `number`
+- frontend confirmation callbacks are frontend-only and do not exist in backend Rust structs
+
+This file should be kept synchronized with backend serialized response shapes.
+
+---
+
+## Design Characteristics
+
+The runtime model is:
+
+- explicit
+- typed
+- backend-shaped
+- panel-consumable
+- local-first
+- Git-centered
+- LLM-advisory aware
+- preview-aware
+- safety-state aware
+
+---
+
+## Dependencies
+
+No imports.
+
+Pure TypeScript type-definition file.
+
+---
+
+## Current Known Gaps
+
+- Some frontend fields are optional even when backend currently returns them.
+- String classifications such as `risk`, `status`, `classification`, `risk_level`, and `operation` are not narrowed into stricter unions.
+- `ExplainContext.kind` is a generic string instead of a strict source union.
+- `GitRemoteStatus.remote` is both optional and nullable.
+- `GitRemoteStatus.is_clean` is optional even though backend currently returns it.
+- `SystemLogEntry` contains both `date` and `time`, while current logging may place the full timestamp in `date` and leave `time` empty.
+- No runtime validators exist here.
+- No schema version is defined for these runtime contracts.
+
+---
+
+## Verification Notes
+
+This document is based on full-file inspection of:
+
+- `src/core/chronogitRuntimeTypes.ts`
+
+No behavior outside directly verified source has been documented.
+
+---
+
+## Status
+
+active

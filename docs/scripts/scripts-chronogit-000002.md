@@ -4,8 +4,8 @@ Date: 2026-05-04
 Author: Matz
 Type: scripts
 Subsystem: control-api
-Updated: 2026-05-05
-Revision: 3
+Updated: 2026-05-07
+Revision: 5
 
 ---
 
@@ -13,198 +13,263 @@ Revision: 3
 @subsystem:control-api
 @entity:script:chronogit-app/src-tauri/src/lib.rs
 @entity:/chronogit-app/src-tauri/src/lib.rs
+@semantic:tauri-command-layer
 @semantic:git-execution
 @semantic:git-status
 @semantic:git-mutation
-@semantic:git-temporal
-@semantic:git-commit-comparison
-@semantic:git-file-history
+@semantic:git-branching
 @semantic:git-remote-awareness
 @semantic:git-remote-preview
 @semantic:merge-safety-prediction
 @semantic:operation-state-detection
-@semantic:tauri-command-layer
+@semantic:git-temporal
+@semantic:file-lineage
+@semantic:commit-comparison
+@semantic:log-backup
 @semantic:llm-local
-@semantic:llm-comparison-explanation
-@semantic:gpu-control
+@semantic:llm-streaming
+@semantic:ollama-integration
+@semantic:gpu-power-limit
 @semantic:external-url-allowlist
 @state:active
 
 # lib.rs
 
 **Date:** 2026-05-04  
-**Summary:** Tauri backend command layer for ChronoGit. Executes Git operations, parses deterministic Git state, enforces path and mutation safety, provides Time Machine diff/comparison commands, provides remote preview/execution commands, detects interrupted Git operations, and integrates local Ollama explanations with GPU power limiting.  
-**Keywords:** tauri backend, git command layer, git parser, commit comparison, selected diff explanation, remote preview, merge safety, local llm, ollama integration  
-**Tags:** scripts, backend, control-api, git, tauri, llm, remote-sync, focus-mode
+**Summary:** Tauri backend execution and truth layer for ChronoGit. Provides controlled Git CLI execution, repository discovery, branch management, guarded remote operations, merge-safety prediction, Time Machine history/diff/lineage systems, file mutation commands, local Ollama integration, streamed LLM explanation events, GPU power-limit management for non-streaming LLM calls, and local backup persistence commands.  
+**Keywords:** tauri backend, git cli, remote preview, merge safety, branch switching, time machine, lineage, ollama, streaming llm, gpu tdp, backup persistence  
+**Tags:** scripts, backend, control-api, git, tauri, time-machine, remote-awareness, llm
 
-Execution and truth layer for ChronoGit.
+Controlled backend execution boundary for ChronoGit.
 
 ---
 
 ## Purpose
 
-Provides a controlled execution boundary between:
+`src-tauri/src/lib.rs` is the primary backend runtime and execution surface for ChronoGit.
 
-React UI → Tauri backend → Git CLI / Ollama / OS browser
+It provides the controlled boundary between:
 
-Ensures:
+- React/Tauri frontend panels
+- local Git repositories
+- local Ollama inference
+- OS integration commands
+- backup persistence surfaces
+- local file restoration workflows
 
-- structured outputs
-- validated mutation inputs
-- deterministic Git truth extraction
-- guarded Git mutation
-- safe commit-reference validation
-- allowlisted external URL opening
-- local-only LLM integration
+The frontend never executes Git directly.
+
+All authoritative Git interaction routes through this backend layer.
 
 ---
 
-## Core Responsibilities
+## Architectural Role
 
-### 1. Git Availability and External URL Opening
+`lib.rs` acts as:
 
-Commands:
+- controlled execution boundary
+- deterministic Git truth extraction layer
+- Git mutation layer
+- Time Machine backend
+- branch-management backend
+- remote preview/execution backend
+- merge-safety prediction layer
+- file-lineage backend
+- local-only LLM backend
+- local streaming event emitter
+- backup persistence layer
+- OS integration boundary
 
-- `detect_git`
+It is the backend equivalent of a Jarri-style controlled execution surface:
+
+Raw Git CLI → structured Rust model → frontend truth projection.
+
+---
+
+## Runtime Data Structures
+
+Defines serializable runtime structures used by the frontend:
+
+### Git State Structures
+
+- `FileChange`
+- `GitStatusResponse`
+- `GitRemoteStatus`
+- `BranchInfo`
+- `BranchOverview`
+- `GitOperationState`
+
+### Remote Operation Structures
+
+- `RemotePullResult`
+- `RemotePushResult`
+- `MergeSafetyPrediction`
+- `RemoteOperationPreview`
+
+### Repository Structures
+
+- `RepoInfo`
+
+### Commit / History Structures
+
+- `CommitResult`
+- `CommitPreflight`
+- `HistoryCommit`
+- `ChangedFile`
+- `DiffResult`
+- `CommitComparison`
+
+### File Lineage Structures
+
+- `FileHistoryEntry`
+- `FileRenameEvent`
+- `FileLineage`
+
+### LLM Structures
+
+- `ExplainDiffResult`
+- `LocalModel`
+- `LlmStreamEvent`
+
+### Internal Ollama Structures
+
+Internal-only request/response parsing structures:
+
+- `OllamaGenerateRequest`
+- `OllamaGenerateResponse`
+- `OllamaTagsResponse`
+- `OllamaTagModel`
+- `OllamaTagDetails`
+- `OllamaStreamChunk`
+
+These are not frontend-facing UI truth models.
+
+---
+
+## External URL Allowlist
+
+Command:
+
 - `open_external_url`
 
-`detect_git` verifies that Git is available through `git --version`.
-
-`open_external_url` opens only allowlisted URLs through the operating system default browser.
-
-Allowlist:
+Allows only these exact URLs:
 
 - `http://jarri.systems`
 - `https://github.com/TorMatzAndren`
 
-Platform behavior:
+Platform execution:
 
-- Windows: `cmd /C start`
-- macOS: `open`
-- Linux/Unix: `xdg-open`
+- Windows → `cmd /C start`
+- macOS → `open`
+- Linux/Unix → `xdg-open`
 
-Unlisted URLs are blocked.
+Non-allowlisted URLs are blocked.
 
----
-
-### 2. Git State Extraction
-
-Commands:
-
-- `git_status`
-- `git_remote_status`
-- `git_operation_state`
-
-`git_status` parses:
-
-- `git status --porcelain=v1 --branch`
-
-It returns:
-
-- branch
-- staged/prepared changes
-- working folder changes
-
-`git_remote_status` parses:
-
-- `git status -sb`
-- `git remote -v`
-
-It returns:
-
-- branch
-- upstream
-- remote name
-- remote URL
-- ahead count
-- behind count
-- remote presence
-- divergence state
-- clean sync state
-
-`git_operation_state` detects interrupted Git operations by inspecting `.git` state files/directories:
-
-- `rebase-merge`
-- `rebase-apply`
-- `MERGE_HEAD`
-- `CHERRY_PICK_HEAD`
-- `REVERT_HEAD`
-
-It also lists unresolved conflict files through:
-
-- `git diff --name-only --diff-filter=U`
+This prevents arbitrary browser-launch execution from frontend state.
 
 ---
 
-### 3. Change Classification
-
-Function:
-
-- `classify_change`
-
-Produces:
-
-- status:
-  - untracked
-  - conflict
-  - modified
-  - added
-  - deleted
-  - renamed
-  - copied
-  - unknown
-
-Risk levels:
-
-- critical
-- danger
-- evidence
-- review
-- normal
-
-Special handling:
-
-- backup-like file detection:
-  - `.bak`
-  - `.tmp`
-  - `.old`
-  - `.orig`
-  - `~`
-- conflict state detection:
-  - `UU`
-  - `AA`
-  - `DD`
-  - `AU`
-  - `UA`
-  - `DU`
-  - `UD`
-
----
-
-### 4. Repository Discovery
+## Git Availability Detection
 
 Command:
 
-- `discover_git_repos`
+- `detect_git`
 
-Discovery roots are built from:
+Runs:
+
+- `git --version`
+
+Purpose:
+
+- verifies Git availability
+- verifies PATH resolution
+- returns version string to frontend
+
+---
+
+## Git Change Classification
+
+Helpers:
+
+- `classify_backup`
+- `classify_change`
+
+### Backup Detection
+
+Backup-like files are recognized by:
+
+- `.bak`
+- `.tmp`
+- `.old`
+- `.orig`
+- `~`
+
+### Risk Classifications
+
+Generated classifications include:
+
+- `critical`
+- `danger`
+- `evidence`
+- `review`
+- `normal`
+
+### Conflict Detection
+
+Conflict states:
+
+- `UU`
+- `AA`
+- `DD`
+- `AU`
+- `UA`
+- `DU`
+- `UD`
+
+are classified as:
+
+- `status = conflict`
+- `risk = critical`
+
+### Projection Philosophy
+
+The backend generates structured classifications and explanations for frontend display.
+
+Git remains authoritative.
+
+The classification layer is advisory projection logic.
+
+---
+
+## Repository Discovery System
+
+Commands/helpers:
+
+- `discover_git_repos`
+- `discover_scan_roots`
+- `scan_git_repos`
+
+### Scan Roots
+
+Repository discovery includes:
 
 - `CHRONOGIT_SCAN_ROOTS`
-- common home subfolders:
-  - projects
-  - Projects
-  - dev
-  - Dev
-  - src
-  - code
-  - work
-  - Documents
-  - Desktop
-  - Downloads
+- `$HOME/projects`
+- `$HOME/Projects`
+- `$HOME/dev`
+- `$HOME/Dev`
+- `$HOME/src`
+- `$HOME/code`
+- `$HOME/work`
+- `$HOME/Documents`
+- `$HOME/Desktop`
+- `$HOME/Downloads`
 - `$HOME`
 - `/opt`
 
-Excluded folders include:
+### Ignored Directories
+
+Traversal skips:
 
 - `.git`
 - `node_modules`
@@ -219,16 +284,403 @@ Excluded folders include:
 - `.ollama`
 - `.vscode`
 
-Depth limits:
+### Depth Rules
 
-- `$HOME`: depth 2
-- other scan roots: depth 5
+Maximum recursion depth:
 
-Results are sorted and deduplicated.
+- `$HOME` root → depth 2
+- other roots → depth 5
+
+### Result Behavior
+
+Results are:
+
+- sorted
+- deduplicated
+- returned as `RepoInfo`
 
 ---
 
-### 5. Safe Mutation Layer
+## Branch Parsing and Branch Management
+
+Helpers:
+
+- `parse_remote_counts`
+- `parse_branch_ahead_behind`
+- `validate_branch_name`
+
+Commands:
+
+- `git_create_branch`
+- `git_switch_branch`
+- `git_branch_overview`
+
+---
+
+## Branch Name Validation
+
+`validate_branch_name` blocks:
+
+- empty names
+- whitespace
+- leading `-`
+- `..`
+- `//`
+- `@{`
+- trailing `.`
+- trailing `/`
+- `\`
+- `~`
+- `^`
+- `:`
+- `?`
+- `*`
+- `[` characters
+
+This is a frontend-facing safety boundary before Git execution.
+
+---
+
+## Branch Creation
+
+Command:
+
+- `git_create_branch`
+
+Uses:
+
+- `git show-ref --verify --quiet refs/heads/<branch>`
+- `git branch <branch>`
+
+Behavior:
+
+- refuses existing branches
+- creates local branch only
+- does not switch active branch
+
+---
+
+## Branch Switching
+
+Command:
+
+- `git_switch_branch`
+
+Behavior:
+
+- validates branch name
+- verifies local branch existence
+- blocks dirty working trees
+- blocks self-repository switching
+- switches branch only when clean
+
+Uses:
+
+- `git status --porcelain=v1`
+- `git checkout <branch>`
+
+### Self-Repository Guard
+
+ChronoGit refuses switching branches when the running executable resides inside the target repository.
+
+Reason:
+
+- switching ChronoGit’s own repo may replace active source/binaries
+- can cause UI corruption
+- can cause blank panels
+- can cause restart/runtime instability
+
+This is an intentional execution-safety boundary.
+
+---
+
+## Branch Overview
+
+Command:
+
+- `git_branch_overview`
+
+Uses:
+
+- `git branch --show-current`
+- `git rev-parse --short HEAD`
+- `git for-each-ref`
+
+Returns:
+
+- current branch
+- detached HEAD state
+- local branches
+- remote branches
+- upstream tracking
+- ahead/behind tracking
+- short hashes
+
+Detached HEAD state creates a synthetic `BranchInfo` entry:
+
+- `DETACHED HEAD @ <hash>`
+
+---
+
+## Remote Awareness System
+
+Commands/helpers:
+
+- `git_remote_status`
+- `current_branch`
+- `current_upstream`
+- `remote_name_from_upstream`
+- `ahead_behind_against_upstream`
+- `fetch_configured_remote`
+
+### Remote Status Extraction
+
+Uses:
+
+- `git status -sb`
+- `git remote -v`
+
+Extracts:
+
+- branch
+- upstream
+- remote
+- remote URL
+- ahead count
+- behind count
+- divergence state
+- remote presence
+- clean sync state
+
+### Remote State Semantics
+
+Computed states include:
+
+- local-only
+- ahead
+- behind
+- diverged
+- in sync
+
+Frontend projection labels are generated elsewhere.
+
+---
+
+## Remote Preview System
+
+Commands:
+
+- `git_fetch_remote`
+- `git_push_preview`
+- `git_pull_preview`
+
+Helpers:
+
+- `preview_commits`
+- `preview_commit_hashes`
+- `preview_changed_files_from_commits`
+
+### Push Preview Range
+
+Push preview uses:
+
+- `@{u}..HEAD`
+
+Meaning:
+
+- local-only commits not present remotely
+
+### Pull Preview Range
+
+Pull preview uses:
+
+- `HEAD..@{u}`
+
+Meaning:
+
+- remote-only commits not present locally
+
+### Preview Philosophy
+
+Preview commands:
+
+- do not mutate repositories
+- do not merge
+- do not push
+- do not pull
+
+They are inspection/projection surfaces only.
+
+---
+
+## Merge Safety Prediction
+
+Helpers:
+
+- `count_working_changes`
+- `build_merge_safety_prediction`
+
+Prediction logic compares:
+
+- local-only changed paths
+- remote-only changed paths
+- overlapping paths
+- working-tree dirtiness
+
+### Classifications
+
+Generated classifications:
+
+- `NEEDS REVIEW`
+- `ONE-WAY`
+- `LIKELY CLEAN`
+
+### Risk Levels
+
+Generated risk levels:
+
+- `LOW`
+- `MEDIUM`
+- `HIGH`
+
+### Important Boundary
+
+This is predictive logic only.
+
+It does not replace Git’s actual merge/conflict result.
+
+The code explicitly warns that Git remains authoritative.
+
+---
+
+## Remote Execution System
+
+Commands:
+
+- `git_push_execute`
+- `git_pull_rebase_execute`
+- `git_rebase_abort`
+
+---
+
+## Push Execution
+
+Command:
+
+- `git_push_execute`
+
+Runs:
+
+- `git push`
+
+### Safety Gates
+
+Push execution blocks when:
+
+- nothing is ahead
+- HIGH risk lacks `override`
+- diverged/MEDIUM risk lacks confirmation
+
+### Important Behavior
+
+Force push is not implemented.
+
+The code explicitly refuses destructive force-push behavior.
+
+---
+
+## Pull/Rebase Execution
+
+Command:
+
+- `git_pull_rebase_execute`
+
+Runs:
+
+- `git pull --rebase --autostash`
+
+### Safety Gates
+
+Blocks when:
+
+- remote is not ahead
+- HIGH risk lacks `override`
+- MEDIUM risk lacks `confirm`
+
+### Post-Execution Behavior
+
+After successful pull/rebase:
+
+- performs `fetch_configured_remote`
+- refreshes remote knowledge
+
+### Failure Behavior
+
+Error messaging explicitly instructs the frontend/user to:
+
+- abort rebase when necessary
+- inspect Git state before further actions
+
+---
+
+## Interrupted Git Operation Detection
+
+Command:
+
+- `git_operation_state`
+
+Detects:
+
+- rebase state
+- merge state
+- cherry-pick state
+- revert state
+
+Detection surfaces:
+
+- `.git/rebase-merge`
+- `.git/rebase-apply`
+- `.git/MERGE_HEAD`
+- `.git/CHERRY_PICK_HEAD`
+- `.git/REVERT_HEAD`
+
+Conflict detection uses:
+
+- `git diff --name-only --diff-filter=U`
+
+Returns:
+
+- structured operation-state flags
+- conflicted file list
+- warning message
+
+---
+
+## Git Status System
+
+Command:
+
+- `git_status`
+
+Uses:
+
+- `git status --porcelain=v1 --branch`
+
+Separates:
+
+- staged changes
+- working-folder changes
+
+Each path is converted into structured `FileChange` values.
+
+---
+
+## File Mutation System
+
+Helpers:
+
+- `run_git_path_action`
+- `validate_relative_path`
 
 Commands:
 
@@ -237,35 +689,81 @@ Commands:
 - `git_restore`
 - `git_remove_untracked`
 - `git_ignore_path`
-- `git_commit`
-
-Safety mechanisms:
-
-- relative path validation
-- absolute paths blocked
-- parent traversal blocked
-- empty paths blocked
-- untracked removal verifies `??` state before `git clean -f`
-- commit message required
-- commit blocked if no staged changes exist
-- commit blocked if unresolved conflicts exist
-
-Git commands used include:
-
-- `git add`
-- `git restore --staged`
-- `git restore`
-- `git clean -f`
-- `.gitignore` append
-- `git commit -m`
 
 ---
 
-### 6. Commit Preflight
+## Path Validation
 
-Command:
+`validate_relative_path` blocks:
+
+- empty paths
+- absolute paths
+- `..` traversal
+
+This validation is reused across mutation and restoration commands.
+
+---
+
+## File Actions
+
+### Stage
+
+`git_stage`
+
+Runs:
+
+- `git add -- <path>`
+
+### Unstage
+
+`git_unstage`
+
+Runs:
+
+- `git restore --staged -- <path>`
+
+### Restore
+
+`git_restore`
+
+Runs:
+
+- `git restore -- <path>`
+
+Restores working-folder file content.
+
+### Remove Untracked
+
+`git_remove_untracked`
+
+Behavior:
+
+- verifies path is truly `??`
+- then executes:
+
+`git clean -f -- <path>`
+
+### Ignore Path
+
+`git_ignore_path`
+
+Behavior:
+
+- appends path to `.gitignore`
+
+---
+
+## Commit / Snapshot System
+
+Commands:
 
 - `git_commit_preflight`
+- `git_commit`
+- `git_amend_latest_commit_message`
+
+---
+
+## Commit Preflight
 
 Uses:
 
@@ -277,498 +775,598 @@ Returns:
 - staged file count
 - insertion count
 - deletion count
-- empty-state flag
-
-This command provides the backend truth for the UI snapshot boundary.
+- empty snapshot state
 
 ---
 
-### 7. Temporal Layer / Time Machine
+## Commit Creation
+
+Command:
+
+- `git_commit`
+
+Blocks:
+
+- empty commit messages
+- unresolved conflicts
+- empty staged state
+
+Uses:
+
+- `git commit -m`
+- `git rev-parse --short HEAD`
+
+Returns structured `CommitResult`.
+
+---
+
+## Commit Message Amend
+
+Command:
+
+- `git_amend_latest_commit_message`
+
+Behavior:
+
+- requires clean working tree
+- rewrites latest commit message
+- captures old/new hashes
+
+Uses:
+
+- `git commit --amend -m`
+
+The implementation explicitly informs the frontend that the hash changed.
+
+---
+
+## Time Machine Systems
+
+Helpers:
+
+- `validate_commitish`
+- `commit_label`
 
 Commands:
 
 - `git_history`
 - `git_changed_files_from_commit`
 - `git_diff_file_from_commit`
-- `git_restore_file_from_commit`
 - `git_compare_commits`
 - `git_file_history`
-
-Capabilities:
-
-- read last 50 commits
-- list changed files per commit
-- extract selected file diff
-- compare two selected commits
-- collect file history across renames
-- restore one selected file from one selected commit into the working folder
-
-Commands used include:
-
-- `git log`
-- `git diff-tree`
-- `git show`
-- `git diff`
-- `git checkout <commit> -- <path>`
-
-Constraint:
-
-No full repository rollback is implemented. Restore is file-level only.
-
----
-
-### 8. Commit Reference Validation
-
-Function:
-
-- `validate_commitish`
-
-Validation rules:
-
-- commit reference must not be empty
-- commit reference must not start with `-`
-- commit reference must not contain whitespace
-- commit reference must resolve through `git rev-parse --verify <value>^{commit}`
-
-Used by:
-
-- `git_diff_file_from_commit`
-- `git_compare_commits`
+- `git_file_lineage`
 - `git_restore_file_from_commit`
 
-This prevents arbitrary option-like values from being treated as commit references.
+---
+
+## Commit Validation
+
+`validate_commitish` verifies commit references using:
+
+- `git rev-parse --verify <commit>^{commit}`
+
+Blocks:
+
+- empty commit refs
+- whitespace
+- leading `-`
 
 ---
 
-### 9. A ↔ B Commit Comparison
+## History System
 
-Command:
-
-- `git_compare_commits`
-
-Inputs:
-
-- repository path
-- left commit
-- right commit
-
-Validation:
-
-- both commit references must pass `validate_commitish`
-- left and right commit must differ
-
-Git commands:
-
-- `git diff --name-status --find-renames --find-copies A B`
-- `git diff --numstat A B`
-- `git diff --find-renames --find-copies A B`
-- `git log -1 --pretty=format:%h %s`
-
-Returns:
-
-- left commit
-- right commit
-- left label
-- right label
-- changed files
-- insertion count
-- deletion count
-- full diff
-
-This provides the backend truth for Focus Mode A ↔ B comparison.
-
----
-
-### 10. File History
-
-Command:
-
-- `git_file_history`
+`git_history`
 
 Uses:
 
-- `git log --follow --name-status --pretty=format:COMMIT... -- <path>`
+- `git log --pretty=format:...`
 
 Returns:
 
-- commit hash
-- short hash
-- author
-- timestamp
-- message
-- file status
-- path
-
-Current status:
-
-- backend implemented
-- UI surface not yet implemented
+- full history
+- no artificial frontend-imposed commit limit
 
 ---
 
-### 11. Remote Preview Layer
+## Single Commit File Inspection
 
-Commands:
+`git_changed_files_from_commit`
 
-- `git_fetch_remote`
-- `git_push_preview`
-- `git_pull_preview`
+Uses:
 
-Helper functions:
+- `<commit>^!`
 
-- `current_branch`
-- `current_upstream`
-- `remote_name_from_upstream`
-- `ahead_behind_against_upstream`
-- `preview_commits`
-- `preview_commit_hashes`
-- `preview_changed_files_from_commits`
-- `count_working_changes`
-
-Remote preview uses directional commit ranges:
-
-- upload preview: `@{u}..HEAD`
-- download preview: `HEAD..@{u}`
-
-Preview output includes:
-
-- operation name
-- repo path
-- branch
-- upstream
-- remote
-- ahead/behind counts
-- commit list
-- changed file list
-- consequence text
-- warning text
-- merge safety prediction
-
-Preview commands do not push, pull, merge, rebase, or modify working files.
+Returns changed files for one commit only.
 
 ---
 
-### 12. Merge Safety Prediction
+## File Diff Inspection
 
-Function:
+`git_diff_file_from_commit`
 
-- `build_merge_safety_prediction`
+Uses:
 
-Compares local-only and remote-only touched paths.
+- `git show --format= --find-renames --find-copies`
 
-Classifications:
+Returns:
 
-- `NEEDS REVIEW`
-- `ONE-WAY`
-- `LIKELY CLEAN`
-
-Risk levels:
-
-- `LOW`
-- `MEDIUM`
-- `HIGH`
-
-Risk rules:
-
-- same-path overlap + working changes → HIGH
-- same-path overlap or working changes → MEDIUM
-- otherwise → LOW
-
-Outputs include:
-
-- classification
-- risk level
-- summary
-- local touched file count
-- remote touched file count
-- local file list
-- remote file list
-- shared file list
-- working change count
-- warning
-
-Important constraint:
-
-This is a prediction only. Git remains authoritative.
+- full patch for selected file within selected commit
 
 ---
 
-### 13. Remote Execution Layer
+## Commit Comparison System
 
-Commands:
+`git_compare_commits`
 
-- `git_push_execute`
-- `git_pull_rebase_execute`
-- `git_rebase_abort`
+Uses:
 
-`git_push_execute`:
+- `git diff --name-status`
+- `git diff --numstat`
+- `git diff`
 
-- requires local branch to be ahead
-- blocks HIGH risk unless override token is `override`
-- blocks diverged or MEDIUM-risk upload unless token is `confirm` or `override`
-- runs plain `git push`
-- never force pushes
+Returns:
 
-`git_pull_rebase_execute`:
-
-- requires remote branch to be ahead
-- blocks HIGH risk diverged download unless override token is `override`
-- blocks MEDIUM risk unless token is `confirm`
-- runs `git pull --rebase --autostash`
-- performs a post-pull fetch on success
-- reports conflict/rebase guidance on failure
-
-`git_rebase_abort`:
-
-- runs `git rebase --abort`
-
----
-
-### 14. LLM Integration / Ollama
-
-Commands:
-
-- `list_local_llm_models`
-- `explain_diff_with_ollama`
-- `explain_context_with_ollama`
-- `explain_comparison_with_ollama`
-
-Ollama endpoints:
-
-- `GET http://127.0.0.1:11434/api/tags`
-- `POST http://127.0.0.1:11434/api/generate`
-
-The backend validates that the requested model exists locally before generating explanations.
-
-LLM output is cleaned by:
-
-- removing escape/control sequences
-- removing thinking markers
-- trimming unwanted prompt echoes
-- compacting blank lines
-
----
-
-### 15. Diff Explanation
-
-Command:
-
-- `explain_diff_with_ollama`
-
-Used for:
-
-- selected file diff explanation
-- selected hunk-line explanation
-
-Special behavior:
-
-- rejects empty diffs
-- validates local model existence
-- applies lockfile summarization when appropriate
-- clips diff input before model call
-- applies GPU TDP guard
-- returns structured explanation and TDP readings
-
-Prompt constraints include:
-
-- explain only selected diff
-- do not invent context
-- claims must be grounded in changed lines
-- do not claim cloud, telemetry, security, platform, or build problems unless visible
-- mention safety/mutation/Git state only when visible
-
----
-
-### 16. Context Explanation
-
-Command:
-
-- `explain_context_with_ollama`
-
-Used for:
-
-- UI concept explanation
-- system log explanation
-- remote/preflight help
-
-Prompt constraints include:
-
-- explain supplied UI context and raw truth only
-- ChronoGit is local-only
-- Git truth and deterministic UI state are authoritative
-- use ChronoGit UI terms first
-- do not recommend terminal commands unless the UI cannot perform the action
-- never recommend `git reset --hard` unless explicitly requested
-
----
-
-### 17. A ↔ B Comparison Explanation
-
-Command:
-
-- `explain_comparison_with_ollama`
-
-Inputs:
-
-- model
-- left label
-- right label
-- file count
+- changed files
 - insertions
 - deletions
-- changed files text
-- diff
+- full diff
+- human labels for both commits
 
-Purpose:
-
-Provides a specialized explanation path for A ↔ B comparison.
-
-Prompt constraints include:
-
-- explain exact A ↔ B Git diff
-- do not give a generic ChronoGit or architecture summary
-- explain only visible comparison stats, changed-file list, and diff
-- do not claim replacement unless diff explicitly removes old behavior or reroutes all callers
-- classify important changes as additive, modifying existing behavior, replacing existing behavior, or removing behavior
-- prioritize biggest code movements and user-visible behavior changes
-- Git diff remains authoritative
-
-This command was added because generic diff explanations were too broad and repeatedly inferred replacement or architecture-level meaning that was not proven by the diff.
+Rejects identical commit comparisons.
 
 ---
 
-### 18. GPU Power Management
+## File History System
 
-Functions:
+`git_file_history`
+
+Uses:
+
+- `git log --follow --name-status`
+
+Returns flattened history entries for a path.
+
+This is older/simple history extraction behavior.
+
+---
+
+## File Lineage System
+
+`git_file_lineage`
+
+Uses:
+
+- `git log --follow --name-status`
+
+Tracks:
+
+- commits
+- rename events
+- deletion state
+- first commit
+- latest commit
+
+Returns:
+
+- rename history
+- lineage events
+- renamed/deleted state flags
+
+This is the more advanced lineage-oriented Time Machine surface.
+
+---
+
+## File Restore from Historical Snapshot
+
+Command:
+
+- `git_restore_file_from_commit`
+
+Uses:
+
+- `git checkout <commit> -- <path>`
+
+Behavior:
+
+- restores one file from one commit into working folder
+- does not automatically commit
+- does not alter unrelated files
+
+---
+
+## Local Ollama Model Discovery
+
+Command:
+
+- `list_local_llm_models`
+
+Supported engine:
+
+- `ollama`
+
+Uses local HTTP endpoint:
+
+- `http://127.0.0.1:11434/api/tags`
+
+Returns:
+
+- model name
+- engine
+- size
+- modified date
+- family
+- parameter size
+- quantization level
+
+---
+
+## Streaming LLM Explanation System
+
+Command:
+
+- `explain_prompt_with_ollama_stream`
+
+Uses:
+
+- local Ollama `/api/generate`
+- streaming JSON responses
+- Tauri event emission
+
+Event channel:
+
+- `chronogit://llm-stream`
+
+### Streaming Behavior
+
+- validates model exists locally
+- streams chunks progressively
+- emits completion event
+- cleans final text
+
+### Important Difference
+
+Streaming explanations do not use GPU power-limit reduction.
+
+That behavior exists only in non-streaming explanation commands.
+
+---
+
+## Non-Streaming LLM Explanation Systems
+
+Commands:
+
+- `explain_context_with_ollama`
+- `explain_diff_with_ollama`
+- `explain_comparison_with_ollama`
+
+All:
+
+- validate local model existence
+- call local Ollama
+- clip oversized prompt payloads
+- clean returned text
+- return structured explanation objects
+
+---
+
+## GPU Power-Limit System
+
+Helpers:
 
 - `query_gpu_power_limits`
 - `set_gpu_power_limit`
 
-Behavior:
-
-- query current/default NVIDIA power limits
-- reduce GPU power limit to approximately 60% during LLM generation
-- attempt reset after generation
-- include warnings in LLM result if power control fails
-
-Requires:
+Uses:
 
 - `nvidia-smi`
-- passwordless/noninteractive sudo access for `/usr/bin/nvidia-smi -pl`
+- `sudo -n /usr/bin/nvidia-smi -pl`
 
-Failure to adjust power does not automatically block explanation generation; it is surfaced as a warning.
+### Execution Flow
+
+1. query current/default power limit
+2. reduce to 60%
+3. execute non-streaming inference
+4. restore original/default limit
+5. report warnings if set/reset fails
+
+### Important Boundary
+
+This assumes:
+
+- NVIDIA GPU exists
+- `nvidia-smi` exists
+- passwordless sudo is configured
+
+The implementation is Linux/NVIDIA-specific behavior.
 
 ---
 
-### 19. Diff Preprocessing
+## LLM Output Cleaning
 
-Functions:
+Helper:
+
+- `clean_ollama_text`
+
+Removes:
+
+- ANSI escape sequences
+- backspaces
+- carriage returns
+- unwanted control characters
+- `<think>` tags
+- thinking narration
+- duplicated blank lines
+
+Also trims generated text around unwanted sections.
+
+---
+
+## Lockfile Explanation Specialization
+
+Helpers:
 
 - `is_lockfile`
 - `summarize_lockfile_diff`
 
-Lockfiles handled specially:
+Recognized lockfiles:
 
 - `Cargo.lock`
 - `package-lock.json`
 - `pnpm-lock.yaml`
 - `yarn.lock`
 
-The backend summarizes visible dependency/package/version changes and instructs the LLM not to over-infer build, platform, dependency, or manual-edit conclusions from lockfile diffs.
+### Behavior
+
+Instead of feeding full lockfile patches directly:
+
+- extracts visible package/version changes
+- generates specialized explanatory guidance
+- instructs LLM not to hallucinate dependency problems
+
+This is an explicit anti-hallucination control surface.
+
+---
+
+## Backup Persistence System
+
+Helpers/commands:
+
+- `chronogit_log_backup_dir`
+- `sanitize_backup_filename`
+- `save_log_backup`
+- `open_log_backup_folder`
+
+---
+
+## Backup Directory Resolution
+
+Default path:
+
+- `$HOME/.local/share/chronogit/log-backups`
+
+Override variable:
+
+- `CHRONOGIT_LOG_BACKUP_DIR`
+
+Supports:
+
+- Linux
+- Windows (`USERPROFILE` fallback)
+
+---
+
+## Backup File Safety
+
+`sanitize_backup_filename` permits only:
+
+- alphanumeric
+- `-`
+- `_`
+- `.`
+
+All other characters become `_`.
+
+---
+
+## Backup Persistence
+
+`save_log_backup`
+
+Behavior:
+
+- creates backup directory
+- sanitizes filename
+- writes body to disk
+
+Used for:
+
+- system logs
+- LLM logs
+- raw patches
+
+---
+
+## Backup Folder Opening
+
+`open_log_backup_folder`
+
+Uses:
+
+- Windows → `explorer`
+- macOS → `open`
+- Linux → `xdg-open`
+
+---
+
+## Tauri Command Registration
+
+`run()` registers all frontend-accessible commands through:
+
+- `tauri::generate_handler!`
+
+Registered surfaces include:
+
+- Git detection
+- external URL opening
+- backup persistence
+- repository discovery
+- remote awareness
+- branch workflows
+- operation-state detection
+- file mutation
+- commit/preflight/amend
+- history/diff/comparison
+- lineage systems
+- file restore
+- Ollama explanation systems
+- streaming events
+- local model discovery
 
 ---
 
 ## Inputs
 
-From UI:
+Primary runtime inputs:
 
-- repository path
-- file path
-- commit hash
-- commit message
-- comparison commit A
-- comparison commit B
-- remote override/confirm token
-- diff content
-- changed-file list text
-- LLM model name
-- explanation kind/title/context/raw truth
-- external URL
+- repository paths
+- relative file paths
+- commit references
+- branch names
+- commit messages
+- override tokens
+- local model names
+- explanation prompts
+- diff text
+- comparison text
+- backup filenames
+- backup bodies
+
+Environment variables:
+
+- `CHRONOGIT_SCAN_ROOTS`
+- `CHRONOGIT_LOG_BACKUP_DIR`
+- `HOME`
+- `USERPROFILE`
+
+External runtime dependencies:
+
+- `git`
+- `nvidia-smi`
+- `sudo`
+- `xdg-open`
+- `open`
+- `explorer`
+- `cmd`
+- local Ollama API
 
 ---
 
 ## Outputs
 
-Structured responses:
+Returns structured Rust objects to frontend panels.
 
-- `GitStatusResponse`
-- `GitRemoteStatus`
-- `GitOperationState`
-- `RepoInfo[]`
-- `CommitPreflight`
-- `CommitResult`
-- `RemoteOperationPreview`
-- `RemotePushResult`
-- `RemotePullResult`
-- `HistoryCommit[]`
-- `ChangedFile[]`
-- `DiffResult`
-- `CommitComparison`
-- `FileHistoryEntry[]`
-- `ExplainDiffResult`
-- `LocalModel[]`
+Also emits streaming events:
+
+- `chronogit://llm-stream`
+
+Writes:
+
+- backup files
+
+Executes:
+
+- local Git mutations
+- local Git inspections
+- local browser/folder opens
+- local Ollama inference requests
 
 ---
 
-## Role in System
+## Truth, Projection, Mutation, and Advisory Boundaries
 
-Acts as:
+### Truth Surfaces
 
-→ deterministic Git truth extraction engine  
-→ safe Git mutation boundary  
-→ Time Machine truth provider  
-→ commit comparison provider  
-→ remote preview and execution controller  
-→ operation-state detector  
-→ local LLM integration controller  
-→ GPU power guard  
-→ allowlisted external URL opener  
+Git CLI output is authoritative.
 
-Bridges:
+This backend extracts and structures Git truth.
 
-React UI ↔ Git CLI  
-React UI ↔ Ollama  
-React UI ↔ OS default browser  
-React UI ↔ NVIDIA power limit control  
+### Projection Systems
+
+Generated classifications and merge-safety predictions are projections layered on top of Git truth.
+
+### Mutation Systems
+
+Mutation commands include:
+
+- branch switching
+- commit creation
+- commit amend
+- restore
+- stage/unstage
+- remote execution
+- file restore
+
+### Advisory Systems
+
+LLM outputs are advisory only.
+
+The prompts explicitly reinforce:
+
+- Git remains authoritative
+- frontend state remains authoritative
+- explanations must not invent hidden context
 
 ---
 
-## Design Principles
+## Design Principles Verified from Source
 
-- no raw shell exposure to UI
-- no arbitrary command execution
-- all path mutations validated
-- commit references validated before use
-- Git CLI is source of truth
-- remote preview separated from remote execution
-- force push is not implemented
-- LLM is optional and advisory
-- destructive actions return explicit messages
-- interrupted Git operations are detectable
+- frontend never executes Git directly
+- branch names are validated before execution
+- paths are validated before file mutation
+- commit references are validated before historical access
+- remote preview is separated from remote execution
+- force push is intentionally absent
+- dirty working trees block branch switching
+- self-repository branch switching is blocked
+- merge safety is predictive only
+- local LLM output is advisory
+- lockfiles receive specialized anti-hallucination handling
+- backup filenames are sanitized
 - external URLs are allowlisted
-- comparison explanation uses stricter prompt constraints than generic diff explanation
+- streaming LLM output is event-based
+- non-streaming inference reduces GPU power limits when possible
 
 ---
 
 ## Current Known Gaps
 
-- file history backend exists but is not surfaced in the UI
-- no commit graph backend yet
-- no built-in conflict resolution engine
-- no branch creation/switching UI commands
-- no stash commands
-- no advanced diff options such as ignore whitespace or side-by-side diff generation
-- duplicated LLM power-limit wrapper logic could later be refactored into a shared helper
+- `git_switch_branch` still uses `git checkout` instead of `git switch`
+- self-repository switching is blocked instead of using controlled restart workflow
+- GPU TDP control assumes NVIDIA + passwordless sudo
+- streaming LLM explanations bypass GPU TDP throttling
+- backup folder naming still references `log-backups` despite patch usage
+- repository discovery uses fixed recursion-depth heuristics
+- merge safety prediction does not replace actual Git merge/conflict resolution
+- `git_file_history` remains older/simple history extraction while `git_file_lineage` is the richer lineage surface
+
+---
+
+## Verification Notes
+
+This document is based on full-file inspection of:
+
+- `src-tauri/src/lib.rs`
+
+The document intentionally distinguishes:
+
+- authoritative Git truth extraction
+- projection/advisory logic
+- mutation boundaries
+- prediction systems
+- streaming event systems
+- local-only inference systems
+
+No behavior outside directly verified source has been documented.
 
 ---
 
