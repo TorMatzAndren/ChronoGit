@@ -1,1 +1,24 @@
-chronogit-app/src/App.bak.tsx
+# Node / frontend
+node_modules
+dist
+.vite
+
+# Rust / Tauri
+target
+
+# Logs
+*.log
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.bak
+*.old
+*~
+
+# Local environment
+.env
+.env.local
