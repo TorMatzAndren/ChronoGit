@@ -1488,7 +1488,7 @@ fn git_history(repo_path: String) -> Result<Vec<HistoryCommit>, String> {
     let out = Command::new("git")
         .arg("-C")
         .arg(&repo_path)
-        .args(["log", "--pretty=format:%H%x1f%h%x1f%an%x1f%cI%x1f%s", "-n", "50"])
+        .args(["log", "--pretty=format:%H%x1f%h%x1f%an%x1f%cI%x1f%s"])
         .output()
         .map_err(|e| e.to_string())?;
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { renderPrettyDiff } from "../components/DiffViewer";
 import { backupPatchFile, openLogBackupFolder } from "../core/persistence";
@@ -39,6 +39,7 @@ export function TimeMachinePanel({
   const [selectedFile, setSelectedFile] = useState<ChangedFile | null>(null);
   const [diff, setDiff] = useState("");
   const [compareBase, setCompareBase] = useState<HistoryCommit | null>(null);
+  const [compareTargetFilePath, setCompareTargetFilePath] = useState("");
   const [comparison, setComparison] = useState<CommitComparison | null>(null);
   const [lineage, setLineage] = useState<FileLineage | null>(null);
   const [selectedDiffLines, setSelectedDiffLines] = useState<Set<number>>(new Set());
@@ -46,6 +47,7 @@ export function TimeMachinePanel({
   const [renameSnapshotText, setRenameSnapshotText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const timelineCommitRefs = useRef<Record<string, HTMLButtonElement | null>>({});
 
   useEffect(() => { void loadHistory(); }, [refreshTick, repoPath]);
 
@@ -100,8 +102,8 @@ export function TimeMachinePanel({
     setSelectedFile(null);
     setLineage(null);
     setSelectedDiffLines(new Set());
-    setDiff("Loading A ↔ B comparison...");
-    const result = await invoke<CommitComparison>("git_compare_commits", { repoPath, leftCommit: compareBase.hash, rightCommit: selected.hash });
+    setDiff("Loading older snapshot → newer target comparison...");
+    const result = await invoke<CommitComparison>("git_compare_commits", { repoPath, leftCommit: selected.hash, rightCommit: compareBase.hash });
     setComparison(result);
     setDiff(result.diff.trim() || "No diff between these two snapshots.");
   }
@@ -112,6 +114,25 @@ export function TimeMachinePanel({
 
   function lineageEntryForCommit(commitHash: string) {
     return lineage?.commits.find((entry) => entry.hash === commitHash) || null;
+  }
+
+  async function jumpToCommitHash(commitHash: string) {
+    const commit = history.find((item) => item.hash === commitHash);
+
+    if (!commit) {
+      setError(`Jump failed: commit ${commitHash.slice(0, 12)} is not loaded in the Time Machine history list.`);
+      return;
+    }
+
+    await selectSnapshot(commit);
+
+    window.setTimeout(() => {
+      timelineCommitRefs.current[commitHash]?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+      timelineCommitRefs.current[commitHash]?.focus();
+    }, 0);
   }
 
   function lineageStatusLabel(status: string) {
@@ -351,35 +372,96 @@ async function restoreSelectedFile() {
       </div>
       {error ? <div className="message">{error}</div> : null}
       <div className="focus-surface">
-        <strong>{comparison ? `A baseline → selected B comparison` : selectedFile ? selectedFile.path : selected ? `${selected.short_hash} — ${selected.message}` : "No focused inspection"}</strong>
+        <strong>{comparison ? "Older snapshot → newer target comparison" : selectedFile ? selectedFile.path : selected ? `${selected.short_hash} — ${selected.message}` : "No focused inspection"}</strong>
         <div className={lineage ? "file-lineage-summary" : "file-lineage-summary file-lineage-summary--empty"}>
           <span><strong>{lineage?.commits.length ?? 0}</strong> {lineage ? `commits touched ${lineage.path}` : "no file lineage selected"}</span>
-          <span><strong>First</strong> {lineage?.first_commit ? `${lineage.first_commit.short_hash} · ${lineage.first_commit.message}` : "—"}</span>
-          <span><strong>Last</strong> {lineage?.last_commit ? `${lineage.last_commit.short_hash} · ${lineage.last_commit.message}` : "—"}</span>
-          <span><strong>Rename</strong> {lineage ? (lineage.renamed ? `${lineage.rename_events.length} event(s)` : "none detected") : "—"}</span>
-          <span><strong>Deleted</strong> {lineage ? (lineage.deleted ? "yes" : "no") : "—"}</span>
+
+          <button
+            type="button"
+            disabled={!lineage?.first_commit}
+            onClick={() => {
+              const target = lineage?.first_commit;
+              if (target) void jumpToCommitHash(target.hash);
+            }}
+            title="Jump to the first visible commit for this file lineage."
+          >
+            <strong>First</strong> {lineage?.first_commit ? `${lineage.first_commit.short_hash} · ${lineage.first_commit.message}` : "—"}
+          </button>
+
+          <button
+            type="button"
+            disabled={!lineage?.last_commit}
+            onClick={() => {
+              const target = lineage?.last_commit;
+              if (target) void jumpToCommitHash(target.hash);
+            }}
+            title="Jump to the latest visible commit for this file lineage."
+          >
+            <strong>Last</strong> {lineage?.last_commit ? `${lineage.last_commit.short_hash} · ${lineage.last_commit.message}` : "—"}
+          </button>
+
+          <button
+            type="button"
+            disabled={!lineage?.rename_events.length}
+            onClick={() => {
+              const target = lineage?.rename_events[0];
+              if (target) void jumpToCommitHash(target.hash);
+            }}
+            title="Jump to the first visible rename event for this file lineage."
+          >
+            <strong>Rename</strong> {lineage ? (lineage.renamed ? `${lineage.rename_events.length} event(s)` : "none detected") : "—"}
+          </button>
+
+          <button
+            type="button"
+            disabled={!lineage?.deleted}
+            onClick={() => {
+              const target = lineage?.commits.find((entry) => entry.status === "D");
+              if (target) void jumpToCommitHash(target.hash);
+            }}
+            title="Jump to the deletion commit for this file lineage."
+          >
+            <strong>Deleted</strong> {lineage ? (lineage.deleted ? "yes" : "no") : "—"}
+          </button>
+        </div>
+        <div className="comparison-target-strip">
+          <span>
+            <strong>Newer target</strong>
+            {compareBase
+              ? `${compareBase.short_hash} — ${compareBase.message}${compareTargetFilePath ? ` · ${compareTargetFilePath}` : ""}`
+              : "not set"}
+          </span>
+          <span>
+            <strong>Older candidate</strong>
+            {selected
+              ? `${selected.short_hash} — ${selected.message}${selectedFile?.path ? ` · ${selectedFile.path}` : ""}`
+              : "not selected"}
+          </span>
         </div>
         <div className="focus-surface__actions">
           <button
             disabled={!selected}
-            onClick={() => setCompareBase(selected)}
-            title="Set the selected snapshot as A: the older/baseline side of the comparison."
+            onClick={() => {
+              setCompareBase(selected);
+              setCompareTargetFilePath(selectedFile?.path || "");
+            }}
+            title="Use the currently selected snapshot as the newer target you want to compare against."
           >
-            Set A baseline
+            Use as newer target
           </button>
           <button
             disabled={!compareBase || !selected || compareBase.hash === selected.hash}
             onClick={compareToSelected}
-            title="Compare from A baseline to the currently selected snapshot B. This shows what changed from A to B."
+            title="Compare the currently selected older snapshot against the saved newer target."
           >
-            Compare A baseline → selected B
+            Compare selected older snapshot → target
           </button>
           <button
             disabled={!compareBase && !comparison}
-            onClick={() => { setCompareBase(null); setComparison(null); }}
-            title="Clear the A baseline and current A/B comparison."
+            onClick={() => { setCompareBase(null); setCompareTargetFilePath(""); setComparison(null); }}
+            title="Clear the saved comparison target."
           >
-            Clear A/B
+            Clear target
           </button>
           <button
             className="danger-button"
@@ -439,6 +521,9 @@ async function restoreSelectedFile() {
             return (
               <button
                 key={commit.hash}
+                ref={(element) => {
+                  timelineCommitRefs.current[commit.hash] = element;
+                }}
                 className={[
                   "timeline-commit",
                   selected?.hash === commit.hash ? "timeline-commit--selected" : "",
