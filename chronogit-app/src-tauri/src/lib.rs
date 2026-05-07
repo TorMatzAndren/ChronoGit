@@ -2514,12 +2514,102 @@ fn git_restore_file_from_commit(repo_path: String, commit_hash: String, path: St
     }
 }
 
+
+fn chronogit_log_backup_dir() -> Result<std::path::PathBuf, String> {
+    if let Ok(raw) = std::env::var("CHRONOGIT_LOG_BACKUP_DIR") {
+        let trimmed = raw.trim();
+        if !trimmed.is_empty() {
+            return Ok(std::path::PathBuf::from(trimmed));
+        }
+    }
+
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map_err(|_| "Could not determine home directory for ChronoGit log backups.".to_string())?;
+
+    Ok(std::path::PathBuf::from(home)
+        .join(".local")
+        .join("share")
+        .join("chronogit")
+        .join("log-backups"))
+}
+
+fn sanitize_backup_filename(filename: &str) -> String {
+    filename
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('_')
+        .to_string()
+}
+
+#[tauri::command]
+fn save_log_backup(filename: String, body: String) -> Result<String, String> {
+    let dir = chronogit_log_backup_dir()?;
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("Could not create ChronoGit log backup directory: {}", e))?;
+
+    let safe_filename = sanitize_backup_filename(&filename);
+    if safe_filename.is_empty() {
+        return Err("Backup filename is empty after sanitization.".into());
+    }
+
+    let path = dir.join(safe_filename);
+    std::fs::write(&path, body)
+        .map_err(|e| format!("Could not write ChronoGit log backup: {}", e))?;
+
+    Ok(path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn open_log_backup_folder() -> Result<String, String> {
+    let dir = chronogit_log_backup_dir()?;
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("Could not create ChronoGit log backup directory: {}", e))?;
+
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut cmd = Command::new("explorer");
+        cmd.arg(&dir);
+        cmd
+    };
+
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut cmd = Command::new("open");
+        cmd.arg(&dir);
+        cmd
+    };
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut command = {
+        let mut cmd = Command::new("xdg-open");
+        cmd.arg(&dir);
+        cmd
+    };
+
+    command
+        .spawn()
+        .map_err(|e| format!("Could not open ChronoGit log backup folder: {}", e))?;
+
+    Ok(dir.to_string_lossy().to_string())
+}
+
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             detect_git,
             open_external_url,
+            save_log_backup,
+            open_log_backup_folder,
             discover_git_repos,
             git_remote_status,
             git_operation_state,

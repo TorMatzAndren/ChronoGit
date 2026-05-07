@@ -37,8 +37,12 @@ import {
 
 import {
   backupLlmLog,
+  backupSystemLog,
   loadLlmLog,
+  loadSystemLog,
+  openLogBackupFolder,
   saveLlmLog,
+  saveSystemLog,
 } from "./core/persistence";
 import type {
   CommitPreflight,
@@ -180,7 +184,7 @@ export default function App() {
   const [llmEngine, setLlmEngine] = useState("ollama");
   const [llmModel, setLlmModel] = useState("qwen3:8b");
   const [message, setMessage] = useState("");
-  const [systemLog, setSystemLog] = useState<SystemLogEntry[]>([]);
+  const [systemLog, setSystemLog] = useState<SystemLogEntry[]>(() => loadSystemLog());
   const [llmLog, setLlmLog] = useState<LlmLogEntry[]>(() => loadLlmLog());
   const [selectedPanelType, setSelectedPanelType] = useState<PanelType>("current-state");
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
@@ -212,6 +216,10 @@ export default function App() {
   useEffect(() => {
     saveLlmLog(llmLog);
   }, [llmLog]);
+
+  useEffect(() => {
+    saveSystemLog(systemLog);
+  }, [systemLog]);
 
   useEffect(() => {
     void initialLoad();
@@ -865,6 +873,16 @@ ${context.rawTruth.slice(0, 12000)}`;
         <SystemLogPanel
           beginnerMode={state.beginnerMode}
           systemLog={systemLog}
+          clearSystemLog={() => setSystemLog([])}
+          backupAndClearSystemLog={async () => {
+            const path = await backupSystemLog(systemLog);
+            setSystemLog([]);
+            setMessage(`System log backed up to: ${path}`);
+          }}
+          openLogBackupFolder={async () => {
+            const path = await openLogBackupFolder();
+            setMessage(`Opened log backup folder: ${path}`);
+          }}
           ui={ui}
         />
       );
@@ -877,9 +895,14 @@ ${context.rawTruth.slice(0, 12000)}`;
           llmLog={llmLog}
           toggleLlmEntry={toggleLlmEntry}
           clearLlmLog={() => setLlmLog([])}
-          backupAndClearLlmLog={() => {
-            backupLlmLog(llmLog);
+          backupAndClearLlmLog={async () => {
+            const path = await backupLlmLog(llmLog);
             setLlmLog([]);
+            setMessage(`LLM log backed up to: ${path}`);
+          }}
+          openLogBackupFolder={async () => {
+            const path = await openLogBackupFolder();
+            setMessage(`Opened log backup folder: ${path}`);
           }}
           ui={ui}
         />

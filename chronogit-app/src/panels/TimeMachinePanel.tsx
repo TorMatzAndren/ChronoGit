@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { renderPrettyDiff } from "../components/DiffViewer";
+import { backupPatchFile, openLogBackupFolder } from "../core/persistence";
 import type {
   ChangedFile,
   CommitComparison,
@@ -254,6 +255,43 @@ export function TimeMachinePanel({
     });
   }
 
+  async function backupCurrentDiffAsPatch() {
+    const rawDiff = diff.trim();
+
+    if (!rawDiff || rawDiff === "Loading file diff..." || rawDiff.startsWith("Select a changed file")) {
+      setError("Patch backup blocked: no real Git diff is currently loaded.");
+      return;
+    }
+
+    try {
+      const filenameStem = comparison
+        ? `chronogit-comparison-${comparison.left_commit.slice(0, 12)}-${comparison.right_commit.slice(0, 12)}`
+        : selectedFile && selected
+          ? `chronogit-diff-${selected.short_hash}-${selectedFile.path.split("/").pop() || "file"}`
+          : "chronogit-diff";
+
+      const path = await backupPatchFile(filenameStem, diff);
+      setError("");
+      appendLlmEntry({
+        source: "diff",
+        model: "system",
+        title: "Patch backup created",
+        content: `Raw patch backup written to:\n${path}`,
+      });
+    } catch (err) {
+      setError(`Patch backup failed: ${err}`);
+    }
+  }
+
+  async function openPatchBackupFolder() {
+    try {
+      const path = await openLogBackupFolder();
+      setError(`Opened backup folder: ${path}`);
+    } catch (err) {
+      setError(`Open backup folder failed: ${err}`);
+    }
+  }
+
 async function restoreSelectedFile() {
     if (!selected || !selectedFile) return;
     const snapshot = selected;
@@ -345,6 +383,12 @@ async function restoreSelectedFile() {
             </button>
             <button disabled={busy || selectedDiffLines.size === 0} onClick={explainSelectedHunkLines}>
               Explain selected hunk lines ({selectedDiffLines.size})
+            </button>
+            <button disabled={!diff.trim() || diff.startsWith("Select a changed file") || diff === "Loading file diff..."} onClick={() => { void backupCurrentDiffAsPatch(); }}>
+              Backup current diff as .patch
+            </button>
+            <button onClick={() => { void openPatchBackupFolder(); }}>
+              Open backup folder
             </button>
             <button disabled={!selectedFile} className="danger-button" onClick={restoreSelectedFile}>
               Restore file
