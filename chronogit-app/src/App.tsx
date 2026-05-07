@@ -909,6 +909,7 @@ ${context.rawTruth.slice(0, 12000)}`;
       return (
         <BranchPanel
           beginnerMode={state.beginnerMode}
+          repoPath={state.repoPath}
           branchOverview={branchOverview}
           loadBranchOverview={() => loadBranchOverview()}
           createBranch={createBranch}

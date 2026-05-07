@@ -3,6 +3,7 @@ import type { BranchInfo, BranchOverview } from "../core/chronogitRuntimeTypes";
 
 type Props = {
   beginnerMode: boolean;
+  repoPath: string;
   branchOverview: BranchOverview | null;
   loadBranchOverview: () => Promise<void>;
   createBranch: (branchName: string) => Promise<void>;
@@ -57,6 +58,7 @@ function BranchRow({
 
 export function BranchPanel({
   beginnerMode,
+  repoPath,
   branchOverview,
   loadBranchOverview,
   createBranch,
@@ -96,6 +98,15 @@ export function BranchPanel({
           {ui(beginnerMode, "Refresh branches", "git for-each-ref")}
         </button>
       </section>
+
+      {repoPath.includes("/ChronoGit") ? (
+        <section className="branch-callout branch-callout--warning">
+          <strong>Self-repository branch switching is guarded</strong>
+          <span>
+            ChronoGit is currently inspecting its own source repository. Switching this repository while ChronoGit is running can replace the app source/binary underneath the program. Use a separate test repository for branch switching, or close ChronoGit and switch manually.
+          </span>
+        </section>
+      ) : null}
 
       <section className="branch-create-box">
         <div>

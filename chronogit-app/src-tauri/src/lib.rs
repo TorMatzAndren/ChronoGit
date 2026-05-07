@@ -583,6 +583,18 @@ fn git_switch_branch(
 ) -> Result<String, String> {
     let branch_name = validate_branch_name(&branch_name)?;
 
+    let current_exe = std::env::current_exe()
+        .map_err(|e| format!("Could not inspect current executable path: {}", e))?;
+
+    let canonical_repo = std::fs::canonicalize(&repo_path)
+        .map_err(|e| format!("Could not canonicalize repository path: {}", e))?;
+
+    if current_exe.starts_with(&canonical_repo) {
+        return Err(
+            "Branch switch blocked: ChronoGit is currently running from this repository. Switching this repository can replace the running app source/binary and cause blank panels or restart behavior. Use a separate test repository, or switch manually after closing ChronoGit.".into()
+        );
+    }
+
     let exists_out = Command::new("git")
         .arg("-C")
         .arg(&repo_path)
