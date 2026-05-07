@@ -149,7 +149,7 @@ struct CommitComparison {
     diff: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 struct FileHistoryEntry {
     hash: String,
     short_hash: String,
@@ -158,6 +158,24 @@ struct FileHistoryEntry {
     message: String,
     status: String,
     path: String,
+}
+
+#[derive(Serialize, Clone)]
+struct FileRenameEvent {
+    hash: String,
+    old_path: String,
+    new_path: String,
+}
+
+#[derive(Serialize)]
+struct FileLineage {
+    path: String,
+    commits: Vec<FileHistoryEntry>,
+    first_commit: Option<FileHistoryEntry>,
+    last_commit: Option<FileHistoryEntry>,
+    renamed: bool,
+    deleted: bool,
+    rename_events: Vec<FileRenameEvent>,
 }
 
 
@@ -1331,6 +1349,137 @@ fn git_amend_latest_commit_message(repo_path: String, message: String) -> Result
         ok: true,
         message: format!("Renamed latest snapshot message. Git commit hash changed: {} → {}", old_hash, new_hash),
         commit_hash: new_hash,
+    })
+}
+
+#[tauri::command]
+fn git_file_lineage(repo_path: String, path: String) -> Result<FileLineage, String> {
+    validate_relative_path(&path)?;
+
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .args([
+            "log",
+            "--follow",
+            "--name-status",
+            "--format=__CHRONOGIT_COMMIT__%x1f%H%x1f%h%x1f%an%x1f%cI%x1f%s",
+            "--",
+        ])
+        .arg(&path)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !out.status.success() {
+        return Err(command_error("git log --follow --name-status -- <path>", &out));
+    }
+
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut commits: Vec<FileHistoryEntry> = Vec::new();
+    let mut rename_events: Vec<FileRenameEvent> = Vec::new();
+    let mut renamed = false;
+    let mut deleted = false;
+
+    let mut current_hash = String::new();
+    let mut current_short_hash = String::new();
+    let mut current_author = String::new();
+    let mut current_timestamp = String::new();
+    let mut current_message = String::new();
+
+    for raw_line in text.lines() {
+        let line = raw_line.trim_end();
+
+        if line.is_empty() {
+            continue;
+        }
+
+        if line.starts_with("__CHRONOGIT_COMMIT__") {
+            let parts: Vec<&str> = line.split('\x1f').collect();
+
+            if parts.len() == 6 {
+                current_hash = parts[1].to_string();
+                current_short_hash = parts[2].to_string();
+                current_author = parts[3].to_string();
+                current_timestamp = parts[4].to_string();
+                current_message = parts[5].to_string();
+            }
+
+            continue;
+        }
+
+        if current_hash.is_empty() {
+            continue;
+        }
+
+        let parts: Vec<&str> = line.split('\t').collect();
+
+        if parts.is_empty() {
+            continue;
+        }
+
+        let status = parts[0].to_string();
+
+        if status.starts_with('R') && parts.len() >= 3 {
+            let old_path = parts[1].to_string();
+            let new_path = parts[2].to_string();
+
+            renamed = true;
+
+            rename_events.push(FileRenameEvent {
+                hash: current_hash.clone(),
+                old_path: old_path.clone(),
+                new_path: new_path.clone(),
+            });
+
+            commits.push(FileHistoryEntry {
+                hash: current_hash.clone(),
+                short_hash: current_short_hash.clone(),
+                author: current_author.clone(),
+                timestamp: current_timestamp.clone(),
+                message: current_message.clone(),
+                status,
+                path: new_path,
+            });
+
+            continue;
+        }
+
+        if parts.len() >= 2 {
+            let entry_path = parts[1].to_string();
+
+            if status == "D" {
+                deleted = true;
+            }
+
+            commits.push(FileHistoryEntry {
+                hash: current_hash.clone(),
+                short_hash: current_short_hash.clone(),
+                author: current_author.clone(),
+                timestamp: current_timestamp.clone(),
+                message: current_message.clone(),
+                status,
+                path: entry_path,
+            });
+        }
+    }
+
+    let last_commit = commits.first().cloned();
+
+    let first_commit = commits
+        .iter()
+        .rev()
+        .find(|entry| entry.status == "A" || entry.status.starts_with('R'))
+        .cloned()
+        .or_else(|| commits.last().cloned());
+
+    Ok(FileLineage {
+        path,
+        commits,
+        first_commit,
+        last_commit,
+        renamed,
+        deleted,
+        rename_events,
     })
 }
 
@@ -2629,6 +2778,7 @@ pub fn run() {
             git_commit,
             git_amend_latest_commit_message,
             git_history,
+            git_file_lineage,
             git_changed_files_from_commit,
             git_diff_file_from_commit,
             git_compare_commits,

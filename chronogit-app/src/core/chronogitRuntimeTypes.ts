@@ -58,6 +58,32 @@ export type HistoryCommit = {
   message: string;
 };
 
+export type FileHistoryEntry = {
+  hash: string;
+  short_hash: string;
+  author: string;
+  timestamp: string;
+  message: string;
+  status: string;
+  path: string;
+};
+
+export type FileRenameEvent = {
+  hash: string;
+  old_path: string;
+  new_path: string;
+};
+
+export type FileLineage = {
+  path: string;
+  commits: FileHistoryEntry[];
+  first_commit: FileHistoryEntry | null;
+  last_commit: FileHistoryEntry | null;
+  renamed: boolean;
+  deleted: boolean;
+  rename_events: FileRenameEvent[];
+};
+
 export type ChangedFile = {
   path: string;
   status: string;

@@ -9,6 +9,7 @@ import type {
   ConfirmAction,
   DiffResult,
   ExplainDiffResult,
+  FileLineage,
   HistoryCommit,
   LlmLogEntry,
 } from "../core/chronogitRuntimeTypes";
@@ -39,6 +40,7 @@ export function TimeMachinePanel({
   const [diff, setDiff] = useState("");
   const [compareBase, setCompareBase] = useState<HistoryCommit | null>(null);
   const [comparison, setComparison] = useState<CommitComparison | null>(null);
+  const [lineage, setLineage] = useState<FileLineage | null>(null);
   const [selectedDiffLines, setSelectedDiffLines] = useState<Set<number>>(new Set());
   const [renameSnapshotOpen, setRenameSnapshotOpen] = useState(false);
   const [renameSnapshotText, setRenameSnapshotText] = useState("");
@@ -62,6 +64,7 @@ export function TimeMachinePanel({
     setSelected(commit);
     setSelectedFile(null);
     setComparison(null);
+    setLineage(null);
     setSelectedDiffLines(new Set());
     setDiff("Select a changed file to view its diff, or choose A ↔ B comparison.");
     const files = await invoke<ChangedFile[]>("git_changed_files_from_commit", { repoPath, commitHash: commit.hash });
@@ -70,22 +73,54 @@ export function TimeMachinePanel({
 
   async function selectFile(file: ChangedFile) {
     if (!selected) return;
-    setSelectedFile(file);
-    setComparison(null);
-    setSelectedDiffLines(new Set());
-    setDiff("Loading file diff...");
-    const result = await invoke<DiffResult>("git_diff_file_from_commit", { repoPath, commitHash: selected.hash, path: file.path });
-    setDiff(result.diff.trim() || "No diff for this file.");
+
+    try {
+      setSelectedFile(file);
+      setComparison(null);
+      setSelectedDiffLines(new Set());
+      setDiff("Loading file diff...");
+
+      const [diffResult, lineageResult] = await Promise.all([
+        invoke<DiffResult>("git_diff_file_from_commit", { repoPath, commitHash: selected.hash, path: file.path }),
+        invoke<FileLineage>("git_file_lineage", { repoPath, path: file.path }),
+      ]);
+
+      setDiff(diffResult.diff.trim() || "No diff for this file.");
+      setLineage(lineageResult);
+      setError("");
+    } catch (err) {
+      setLineage(null);
+      setDiff("");
+      setError(`File inspection failed: ${err}`);
+    }
   }
 
   async function compareToSelected() {
     if (!compareBase || !selected || compareBase.hash === selected.hash) return;
     setSelectedFile(null);
+    setLineage(null);
     setSelectedDiffLines(new Set());
     setDiff("Loading A ↔ B comparison...");
     const result = await invoke<CommitComparison>("git_compare_commits", { repoPath, leftCommit: compareBase.hash, rightCommit: selected.hash });
     setComparison(result);
     setDiff(result.diff.trim() || "No diff between these two snapshots.");
+  }
+
+  function lineageHashes() {
+    return new Set(lineage?.commits.map((entry) => entry.hash) || []);
+  }
+
+  function lineageEntryForCommit(commitHash: string) {
+    return lineage?.commits.find((entry) => entry.hash === commitHash) || null;
+  }
+
+  function lineageStatusLabel(status: string) {
+    if (status === "A") return "introduced selected file";
+    if (status === "D") return "removed selected file";
+    if (status.startsWith("R")) return "renamed selected file";
+    if (status.startsWith("C")) return "copied selected file";
+    if (status === "M") return "modified selected file";
+    return `touched selected file (${status})`;
   }
 
   function hunkLineNumbersForLine(lineNumber: number) {
@@ -317,6 +352,13 @@ async function restoreSelectedFile() {
       {error ? <div className="message">{error}</div> : null}
       <div className="focus-surface">
         <strong>{comparison ? "A ↔ B comparison" : selectedFile ? selectedFile.path : selected ? `${selected.short_hash} — ${selected.message}` : "No focused inspection"}</strong>
+        <div className={lineage ? "file-lineage-summary" : "file-lineage-summary file-lineage-summary--empty"}>
+          <span><strong>{lineage?.commits.length ?? 0}</strong> {lineage ? `commits touched ${lineage.path}` : "no file lineage selected"}</span>
+          <span><strong>First</strong> {lineage?.first_commit ? `${lineage.first_commit.short_hash} · ${lineage.first_commit.message}` : "—"}</span>
+          <span><strong>Last</strong> {lineage?.last_commit ? `${lineage.last_commit.short_hash} · ${lineage.last_commit.message}` : "—"}</span>
+          <span><strong>Rename</strong> {lineage ? (lineage.renamed ? `${lineage.rename_events.length} event(s)` : "none detected") : "—"}</span>
+          <span><strong>Deleted</strong> {lineage ? (lineage.deleted ? "yes" : "no") : "—"}</span>
+        </div>
         <div className="focus-surface__actions">
           <button disabled={!selected} onClick={() => setCompareBase(selected)}>Set A</button>
           <button disabled={!compareBase || !selected || compareBase.hash === selected.hash} onClick={compareToSelected}>Compare A → B</button>
@@ -370,7 +412,36 @@ async function restoreSelectedFile() {
       ) : null}
 
       <div className="timeline-layout timeline-layout--three">
-        <div className="timeline-list">{history.map((commit) => <button key={commit.hash} className={selected?.hash === commit.hash ? "timeline-commit timeline-commit--selected" : "timeline-commit"} onClick={() => selectSnapshot(commit)}><span className="timeline-hash">{commit.short_hash}</span><span className="timeline-message">{commit.message}</span><span className="timeline-meta">{commit.author} · {commit.timestamp}</span></button>)}</div>
+        <div className="timeline-list">
+          {history.map((commit) => {
+            const hashes = lineageHashes();
+            const lineageEntry = lineageEntryForCommit(commit.hash);
+            const touchesLineageFile = hashes.has(commit.hash);
+
+            return (
+              <button
+                key={commit.hash}
+                className={[
+                  "timeline-commit",
+                  selected?.hash === commit.hash ? "timeline-commit--selected" : "",
+                  touchesLineageFile ? "timeline-commit--lineage" : "",
+                  lineageEntry?.status === "A" ? "timeline-commit--lineage-first" : "",
+                  lineageEntry?.status === "D" ? "timeline-commit--lineage-deleted" : "",
+                  lineageEntry?.status.startsWith("R") ? "timeline-commit--lineage-rename" : "",
+                ].filter(Boolean).join(" ")}
+                onClick={() => selectSnapshot(commit)}
+                title={lineageEntry ? lineageStatusLabel(lineageEntry.status) : undefined}
+              >
+                <span className="timeline-hash">{commit.short_hash}</span>
+                <span className="timeline-message">{commit.message}</span>
+                <span className="timeline-meta">{commit.author} · {commit.timestamp}</span>
+                <span className="timeline-lineage-slot">
+                  {lineageEntry ? <span className="timeline-lineage-pill">{lineageStatusLabel(lineageEntry.status)}</span> : null}
+                </span>
+              </button>
+            );
+          })}
+        </div>
         <div className="timeline-files"><div className="diff-title">{selected ? `Changed files in ${selected.short_hash}` : "Changed files"}</div>{changedFiles.length ? changedFiles.map((file) => <button key={`${file.status}-${file.path}`} className={selectedFile?.path === file.path ? "timeline-file timeline-file--selected" : "timeline-file"} onClick={() => selectFile(file)}><span>{file.status}</span><strong>{file.path}</strong></button>) : <div className="timeline-empty">Select a snapshot first.</div>}</div>
         <div className="diff-viewer">
           <div className="diff-title">{comparison ? `${comparison.left_label} → ${comparison.right_label}` : selectedFile ? selectedFile.path : "No file selected"}</div>
