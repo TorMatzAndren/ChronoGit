@@ -264,10 +264,19 @@ export default function App() {
     setSystemLog((current) => {
       if (current[0]?.message === trimmed) return current;
       const now = new Date();
+
+      const timestamp =
+        `${now.getFullYear()}-` +
+        `${String(now.getMonth() + 1).padStart(2, "0")}-` +
+        `${String(now.getDate()).padStart(2, "0")} ` +
+        `${String(now.getHours()).padStart(2, "0")}:` +
+        `${String(now.getMinutes()).padStart(2, "0")}:` +
+        `${String(now.getSeconds()).padStart(2, "0")}`;
+
       return [{
         id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-        date: now.toLocaleDateString(),
-        time: now.toLocaleTimeString(),
+        date: timestamp,
+        time: "",
         level,
         message: trimmed,
       }, ...current].slice(0, 120);
@@ -278,7 +287,18 @@ export default function App() {
     if (!entry.content.trim()) return;
     setLlmLog((current) => [{
       id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-      timestamp: new Date().toLocaleTimeString(),
+      timestamp: (() => {
+        const now = new Date();
+
+        return (
+          `${now.getFullYear()}-` +
+          `${String(now.getMonth() + 1).padStart(2, "0")}-` +
+          `${String(now.getDate()).padStart(2, "0")} ` +
+          `${String(now.getHours()).padStart(2, "0")}:` +
+          `${String(now.getMinutes()).padStart(2, "0")}:` +
+          `${String(now.getSeconds()).padStart(2, "0")}`
+        );
+      })(),
       collapsed: false,
       streaming: false,
       ...entry,

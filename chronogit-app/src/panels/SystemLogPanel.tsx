@@ -34,7 +34,7 @@ export function SystemLogPanel({
       {systemLog.length ? systemLog.map((entry) => (
         <article className={`system-log-entry system-log-entry--${entry.level}`} key={entry.id}>
           <strong>{entry.level}</strong>
-          <span>{entry.date} {entry.time}</span>
+          <span>{entry.date}</span>
           <p>{entry.message}</p>
           <button onClick={() => navigator.clipboard.writeText(entry.message)}>{ui(beginnerMode, "Copy", "clipboard.writeText")}</button>
         </article>

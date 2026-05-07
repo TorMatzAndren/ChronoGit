@@ -351,7 +351,7 @@ async function restoreSelectedFile() {
       </div>
       {error ? <div className="message">{error}</div> : null}
       <div className="focus-surface">
-        <strong>{comparison ? "A ↔ B comparison" : selectedFile ? selectedFile.path : selected ? `${selected.short_hash} — ${selected.message}` : "No focused inspection"}</strong>
+        <strong>{comparison ? `A baseline → selected B comparison` : selectedFile ? selectedFile.path : selected ? `${selected.short_hash} — ${selected.message}` : "No focused inspection"}</strong>
         <div className={lineage ? "file-lineage-summary" : "file-lineage-summary file-lineage-summary--empty"}>
           <span><strong>{lineage?.commits.length ?? 0}</strong> {lineage ? `commits touched ${lineage.path}` : "no file lineage selected"}</span>
           <span><strong>First</strong> {lineage?.first_commit ? `${lineage.first_commit.short_hash} · ${lineage.first_commit.message}` : "—"}</span>
@@ -360,9 +360,27 @@ async function restoreSelectedFile() {
           <span><strong>Deleted</strong> {lineage ? (lineage.deleted ? "yes" : "no") : "—"}</span>
         </div>
         <div className="focus-surface__actions">
-          <button disabled={!selected} onClick={() => setCompareBase(selected)}>Set A</button>
-          <button disabled={!compareBase || !selected || compareBase.hash === selected.hash} onClick={compareToSelected}>Compare A → B</button>
-          <button disabled={!compareBase && !comparison} onClick={() => { setCompareBase(null); setComparison(null); }}>Clear A/B</button>
+          <button
+            disabled={!selected}
+            onClick={() => setCompareBase(selected)}
+            title="Set the selected snapshot as A: the older/baseline side of the comparison."
+          >
+            Set A baseline
+          </button>
+          <button
+            disabled={!compareBase || !selected || compareBase.hash === selected.hash}
+            onClick={compareToSelected}
+            title="Compare from A baseline to the currently selected snapshot B. This shows what changed from A to B."
+          >
+            Compare A baseline → selected B
+          </button>
+          <button
+            disabled={!compareBase && !comparison}
+            onClick={() => { setCompareBase(null); setComparison(null); }}
+            title="Clear the A baseline and current A/B comparison."
+          >
+            Clear A/B
+          </button>
           <button
             className="danger-button"
             disabled={!selected || !history.length || selected.hash !== history[0].hash}
