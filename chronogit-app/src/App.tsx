@@ -50,6 +50,7 @@ import type {
   ConfirmAction,
   ExplainContext,
   ExplainDiffResult,
+  BranchGraph,
   BranchInfo,
   BranchOverview,
   GitOperationState,
@@ -183,6 +184,7 @@ export default function App() {
   const [repos, setRepos] = useState<RepoInfo[]>([]);
   const [remote, setRemote] = useState<GitRemoteStatus | null>(null);
   const [branchOverview, setBranchOverview] = useState<BranchOverview | null>(null);
+  const [branchGraph, setBranchGraph] = useState<BranchGraph | null>(null);
   const [operationState, setOperationState] = useState<GitOperationState | null>(null);
   const [localModels, setLocalModels] = useState<LocalModel[]>([]);
   const [llmEngine, setLlmEngine] = useState("ollama");
@@ -259,7 +261,7 @@ export default function App() {
   }, [state.repoPath, busyPath, remoteBusy, confirmAction, showPreflight]);
 
   async function initialLoad() {
-    await Promise.allSettled([detectGit(), refresh(), loadRepos(), loadLocalModels(), loadBranchOverview()]);
+    await Promise.allSettled([detectGit(), refresh(), loadRepos(), loadLocalModels(), loadBranchOverview(), loadBranchGraph()]);
   }
 
   function appendSystemLog(level: SystemLogEntry["level"], text: string) {
@@ -397,6 +399,7 @@ export default function App() {
       setRemote(remoteResult);
       setOperationState(operationResult);
       void loadBranchOverview(repoPath);
+      void loadBranchGraph(repoPath);
       lastKnownStateSignatureRef.current = JSON.stringify({ statusResult, remoteResult, operationResult });
       appendSystemLog("info", "Refreshed Git status.");
       setHistoryRefreshTick((value) => value + 1);
@@ -424,6 +427,15 @@ export default function App() {
     }
   }
 
+  async function loadBranchGraph(repoPath = state.repoPath) {
+    try {
+      setBranchGraph(await invoke<BranchGraph>("git_branch_graph", { repoPath }));
+    } catch (err) {
+      setBranchGraph(null);
+      appendSystemLog("warning", `Branch graph failed: ${err}`);
+    }
+  }
+
   async function createBranch(branchName: string) {
     try {
       const result = await invoke<string>("git_create_branch", {
@@ -435,6 +447,7 @@ export default function App() {
       setLastAction(result);
       appendSystemLog("action", result);
       await loadBranchOverview();
+      await loadBranchGraph();
     } catch (err) {
       setMessage(`Create branch failed: ${err}`);
       appendSystemLog("error", `Create branch failed: ${err}`);
@@ -471,6 +484,7 @@ export default function App() {
 
           await refresh();
           await loadBranchOverview();
+          await loadBranchGraph();
         } catch (err) {
           setMessage(`Switch branch failed: ${err}`);
           appendSystemLog("error", `Switch branch failed: ${err}`);
@@ -911,7 +925,8 @@ ${context.rawTruth.slice(0, 12000)}`;
           beginnerMode={state.beginnerMode}
           repoPath={state.repoPath}
           branchOverview={branchOverview}
-          loadBranchOverview={() => loadBranchOverview()}
+          branchGraph={branchGraph}
+          loadBranchOverview={() => Promise.all([loadBranchOverview(), loadBranchGraph()]).then(() => undefined)}
           createBranch={createBranch}
           requestSwitchBranch={requestSwitchBranch}
           ui={ui}

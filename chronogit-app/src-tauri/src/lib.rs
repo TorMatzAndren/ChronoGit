@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
-use tauri::Emitter;
 use std::process::Command;
+use tauri::Emitter;
 
 #[derive(Serialize)]
 struct FileChange {
@@ -53,6 +53,32 @@ struct BranchOverview {
     detached_head: bool,
     local_branches: Vec<BranchInfo>,
     remote_branches: Vec<BranchInfo>,
+}
+
+#[derive(Serialize)]
+struct BranchGraphCommit {
+    hash: String,
+    short_hash: String,
+    parents: Vec<String>,
+    refs: Vec<String>,
+    author: String,
+    date: String,
+    subject: String,
+    is_head: bool,
+}
+
+#[derive(Serialize)]
+struct BranchGraphRef {
+    name: String,
+    full_name: String,
+    kind: String,
+    target_short_hash: String,
+}
+
+#[derive(Serialize)]
+struct BranchGraph {
+    commits: Vec<BranchGraphCommit>,
+    refs: Vec<BranchGraphRef>,
 }
 
 #[derive(Serialize)]
@@ -112,14 +138,12 @@ struct RemoteOperationPreview {
     merge_safety: MergeSafetyPrediction,
 }
 
-
 #[derive(Serialize)]
 struct RepoInfo {
     path: String,
     name: String,
     root: String,
 }
-
 
 #[derive(Serialize)]
 struct CommitResult {
@@ -199,16 +223,15 @@ struct FileLineage {
     rename_events: Vec<FileRenameEvent>,
 }
 
-
 #[tauri::command]
 fn open_external_url(url: String) -> Result<String, String> {
-    let allowed = [
-        "http://jarri.systems",
-        "https://github.com/TorMatzAndren",
-    ];
+    let allowed = ["http://jarri.systems", "https://github.com/TorMatzAndren"];
 
     if !allowed.iter().any(|allowed_url| *allowed_url == url) {
-        return Err(format!("External URL blocked by ChronoGit allowlist: {}", url));
+        return Err(format!(
+            "External URL blocked by ChronoGit allowlist: {}",
+            url
+        ));
     }
 
     #[cfg(target_os = "windows")]
@@ -239,7 +262,6 @@ fn open_external_url(url: String) -> Result<String, String> {
     Ok(format!("Opened external browser: {}", url))
 }
 
-
 #[tauri::command]
 fn detect_git() -> Result<String, String> {
     let output = Command::new("git")
@@ -262,7 +284,12 @@ fn classify_backup(path: &str) -> bool {
         || path.ends_with('~')
 }
 
-fn classify_change(index_status: char, worktree_status: char, path: &str, staged: bool) -> FileChange {
+fn classify_change(
+    index_status: char,
+    worktree_status: char,
+    path: &str,
+    staged: bool,
+) -> FileChange {
     let is_backup = classify_backup(path);
     let code = format!("{}{}", index_status, worktree_status);
 
@@ -280,14 +307,21 @@ fn classify_change(index_status: char, worktree_status: char, path: &str, staged
                 "New file not tracked by Git. It will not be included in history unless prepared.",
             )
         }
-    } else if matches!(code.as_str(), "UU" | "AA" | "DD" | "AU" | "UA" | "DU" | "UD") {
+    } else if matches!(
+        code.as_str(),
+        "UU" | "AA" | "DD" | "AU" | "UA" | "DU" | "UD"
+    ) {
         (
             "conflict",
             "critical",
             "Conflict state detected. Manual resolution is required before committing.",
         )
     } else {
-        let active = if staged { index_status } else { worktree_status };
+        let active = if staged {
+            index_status
+        } else {
+            worktree_status
+        };
 
         match active {
             'M' => (
@@ -313,9 +347,21 @@ fn classify_change(index_status: char, worktree_status: char, path: &str, staged
                     "Tracked file deleted in the working folder. Prepare only if this removal is intentional."
                 },
             ),
-            'R' => ("renamed", "review", "Renamed file detected. Review before committing."),
-            'C' => ("copied", "review", "Copied file detected. Review before committing."),
-            _ => ("unknown", "review", "Unclassified Git change. Review before acting."),
+            'R' => (
+                "renamed",
+                "review",
+                "Renamed file detected. Review before committing.",
+            ),
+            'C' => (
+                "copied",
+                "review",
+                "Copied file detected. Review before committing.",
+            ),
+            _ => (
+                "unknown",
+                "review",
+                "Unclassified Git change. Review before acting.",
+            ),
         }
     };
 
@@ -330,7 +376,12 @@ fn classify_change(index_status: char, worktree_status: char, path: &str, staged
     }
 }
 
-fn scan_git_repos(root: &std::path::Path, depth: usize, max_depth: usize, repos: &mut Vec<RepoInfo>) {
+fn scan_git_repos(
+    root: &std::path::Path,
+    depth: usize,
+    max_depth: usize,
+    repos: &mut Vec<RepoInfo>,
+) {
     if depth > max_depth {
         return;
     }
@@ -507,7 +558,6 @@ fn parse_branch_ahead_behind(value: &str) -> (u32, u32) {
     (ahead, behind)
 }
 
-
 fn validate_branch_name(branch_name: &str) -> Result<String, String> {
     let trimmed = branch_name.trim();
 
@@ -577,10 +627,7 @@ fn git_create_branch(repo_path: String, branch_name: String) -> Result<String, S
 }
 
 #[tauri::command]
-fn git_switch_branch(
-    repo_path: String,
-    branch_name: String,
-) -> Result<String, String> {
+fn git_switch_branch(repo_path: String, branch_name: String) -> Result<String, String> {
     let branch_name = validate_branch_name(&branch_name)?;
 
     let current_exe = std::env::current_exe()
@@ -618,20 +665,14 @@ fn git_switch_branch(
         .map_err(|e| e.to_string())?;
 
     if !status_out.status.success() {
-        return Err(command_error(
-            "git status --porcelain=v1",
-            &status_out,
-        ));
+        return Err(command_error("git status --porcelain=v1", &status_out));
     }
 
     if !String::from_utf8_lossy(&status_out.stdout)
         .trim()
         .is_empty()
     {
-        return Err(
-            "Branch switch blocked: working tree contains uncommitted changes."
-                .into(),
-        );
+        return Err("Branch switch blocked: working tree contains uncommitted changes.".into());
     }
 
     let checkout_out = Command::new("git")
@@ -643,10 +684,7 @@ fn git_switch_branch(
         .map_err(|e| e.to_string())?;
 
     if !checkout_out.status.success() {
-        return Err(command_error(
-            "git checkout <branch>",
-            &checkout_out,
-        ));
+        return Err(command_error("git checkout <branch>", &checkout_out));
     }
 
     Ok(format!(
@@ -668,7 +706,9 @@ fn git_branch_overview(repo_path: String) -> Result<BranchOverview, String> {
         return Err(command_error("git branch --show-current", &current_out));
     }
 
-    let current_branch = String::from_utf8_lossy(&current_out.stdout).trim().to_string();
+    let current_branch = String::from_utf8_lossy(&current_out.stdout)
+        .trim()
+        .to_string();
 
     let head_out = Command::new("git")
         .arg("-C")
@@ -753,25 +793,156 @@ fn git_branch_overview(repo_path: String) -> Result<BranchOverview, String> {
     }
 
     if detached_head {
-        local_branches.insert(0, BranchInfo {
-            name: format!("DETACHED HEAD @ {}", detached_hash),
-            full_name: "HEAD".to_string(),
-            short_hash: detached_hash,
-            upstream: None,
-            ahead: 0,
-            behind: 0,
-            is_current: true,
-            is_remote: false,
-            is_detached: true,
-        });
+        local_branches.insert(
+            0,
+            BranchInfo {
+                name: format!("DETACHED HEAD @ {}", detached_hash),
+                full_name: "HEAD".to_string(),
+                short_hash: detached_hash,
+                upstream: None,
+                ahead: 0,
+                behind: 0,
+                is_current: true,
+                is_remote: false,
+                is_detached: true,
+            },
+        );
     }
 
     Ok(BranchOverview {
-        current_branch: if detached_head { "DETACHED HEAD".to_string() } else { current_branch },
+        current_branch: if detached_head {
+            "DETACHED HEAD".to_string()
+        } else {
+            current_branch
+        },
         detached_head,
         local_branches,
         remote_branches,
     })
+}
+
+#[tauri::command]
+fn git_branch_graph(repo_path: String) -> Result<BranchGraph, String> {
+    let head_out = Command::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    let head_hash = if head_out.status.success() {
+        String::from_utf8_lossy(&head_out.stdout).trim().to_string()
+    } else {
+        String::new()
+    };
+
+    let log_out = Command::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .args([
+            "log",
+            "--all",
+            "--max-count=80",
+            "--date=iso-strict",
+            "--pretty=format:%H%x1f%h%x1f%P%x1f%D%x1f%an%x1f%ad%x1f%s%x1e",
+        ])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !log_out.status.success() {
+        return Err(command_error("git log --all branch graph", &log_out));
+    }
+
+    let log_text = String::from_utf8_lossy(&log_out.stdout);
+    let mut commits = Vec::new();
+
+    for record in log_text.split('\x1e') {
+        let trimmed = record.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let parts: Vec<&str> = trimmed.split('\x1f').collect();
+        if parts.len() < 7 {
+            continue;
+        }
+
+        let hash = parts[0].to_string();
+        let parents = parts[2]
+            .split_whitespace()
+            .map(|value| value.to_string())
+            .collect::<Vec<String>>();
+
+        let refs = parts[3]
+            .split(',')
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| value.to_string())
+            .collect::<Vec<String>>();
+
+        commits.push(BranchGraphCommit {
+            is_head: !head_hash.is_empty() && hash == head_hash,
+            hash,
+            short_hash: parts[1].to_string(),
+            parents,
+            refs,
+            author: parts[4].to_string(),
+            date: parts[5].to_string(),
+            subject: parts[6].to_string(),
+        });
+    }
+
+    let refs_out = Command::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .args([
+            "for-each-ref",
+            "--format=%(refname)|%(refname:short)|%(objectname:short)",
+            "refs/heads",
+            "refs/remotes",
+            "refs/tags",
+        ])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !refs_out.status.success() {
+        return Err(command_error("git for-each-ref branch graph", &refs_out));
+    }
+
+    let mut refs = Vec::new();
+
+    for line in String::from_utf8_lossy(&refs_out.stdout).lines() {
+        let parts: Vec<&str> = line.split('|').collect();
+        if parts.len() < 3 {
+            continue;
+        }
+
+        let full_name = parts[0].to_string();
+        let name = parts[1].to_string();
+
+        if name.ends_with("/HEAD") {
+            continue;
+        }
+
+        let kind = if full_name.starts_with("refs/heads/") {
+            "local"
+        } else if full_name.starts_with("refs/remotes/") {
+            "remote"
+        } else if full_name.starts_with("refs/tags/") {
+            "tag"
+        } else {
+            "other"
+        };
+
+        refs.push(BranchGraphRef {
+            name,
+            full_name,
+            kind: kind.to_string(),
+            target_short_hash: parts[2].to_string(),
+        });
+    }
+
+    Ok(BranchGraph { commits, refs })
 }
 
 #[tauri::command]
@@ -861,7 +1032,6 @@ fn git_remote_status(repo_path: String) -> Result<GitRemoteStatus, String> {
     })
 }
 
-
 fn current_branch(repo_path: &str) -> Result<String, String> {
     let out = Command::new("git")
         .arg("-C")
@@ -877,7 +1047,10 @@ fn current_branch(repo_path: &str) -> Result<String, String> {
     let branch = String::from_utf8_lossy(&out.stdout).trim().to_string();
 
     if branch.is_empty() {
-        Err("Current repository is in detached HEAD state. Remote preview requires a branch.".into())
+        Err(
+            "Current repository is in detached HEAD state. Remote preview requires a branch."
+                .into(),
+        )
     } else {
         Ok(branch)
     }
@@ -917,14 +1090,20 @@ fn ahead_behind_against_upstream(repo_path: &str) -> Result<(u32, u32), String> 
         .map_err(|e| e.to_string())?;
 
     if !out.status.success() {
-        return Err(command_error("git rev-list --left-right --count @{u}...HEAD", &out));
+        return Err(command_error(
+            "git rev-list --left-right --count @{u}...HEAD",
+            &out,
+        ));
     }
 
     let text = String::from_utf8_lossy(&out.stdout);
     let parts: Vec<&str> = text.split_whitespace().collect();
 
     if parts.len() < 2 {
-        return Err(format!("Could not parse ahead/behind counts: {}", text.trim()));
+        return Err(format!(
+            "Could not parse ahead/behind counts: {}",
+            text.trim()
+        ));
     }
 
     let behind = parts[0].parse::<u32>().unwrap_or(0);
@@ -953,7 +1132,6 @@ fn preview_commits(repo_path: &str, range: &str) -> Result<Vec<String>, String> 
         .collect())
 }
 
-
 fn preview_commit_hashes(repo_path: &str, range: &str) -> Result<Vec<String>, String> {
     let out = Command::new("git")
         .arg("-C")
@@ -974,7 +1152,10 @@ fn preview_commit_hashes(repo_path: &str, range: &str) -> Result<Vec<String>, St
         .collect())
 }
 
-fn preview_changed_files_from_commits(repo_path: &str, range: &str) -> Result<Vec<ChangedFile>, String> {
+fn preview_changed_files_from_commits(
+    repo_path: &str,
+    range: &str,
+) -> Result<Vec<ChangedFile>, String> {
     let commits = preview_commit_hashes(repo_path, range)?;
     let mut seen = std::collections::BTreeSet::<(String, String)>::new();
 
@@ -982,7 +1163,15 @@ fn preview_changed_files_from_commits(repo_path: &str, range: &str) -> Result<Ve
         let out = Command::new("git")
             .arg("-C")
             .arg(repo_path)
-            .args(["diff-tree", "--root", "--no-commit-id", "--name-status", "-r", "--find-renames", "--find-copies"])
+            .args([
+                "diff-tree",
+                "--root",
+                "--no-commit-id",
+                "--name-status",
+                "-r",
+                "--find-renames",
+                "--find-copies",
+            ])
             .arg(&commit)
             .output()
             .map_err(|e| e.to_string())?;
@@ -1002,7 +1191,10 @@ fn preview_changed_files_from_commits(repo_path: &str, range: &str) -> Result<Ve
         }
     }
 
-    Ok(seen.into_iter().map(|(path, status)| ChangedFile { path, status }).collect())
+    Ok(seen
+        .into_iter()
+        .map(|(path, status)| ChangedFile { path, status })
+        .collect())
 }
 
 fn count_working_changes(repo_path: &str) -> Result<usize, String> {
@@ -1086,12 +1278,14 @@ fn build_merge_safety_prediction(repo_path: &str) -> Result<MergeSafetyPredictio
     })
 }
 
-
-
 fn fetch_configured_remote(repo_path: &str) -> Result<String, String> {
     let upstream = current_upstream(repo_path)?;
-    let remote = remote_name_from_upstream(&upstream)
-        .ok_or_else(|| format!("Could not determine remote name from upstream: {}", upstream))?;
+    let remote = remote_name_from_upstream(&upstream).ok_or_else(|| {
+        format!(
+            "Could not determine remote name from upstream: {}",
+            upstream
+        )
+    })?;
 
     let out = Command::new("git")
         .arg("-C")
@@ -1120,14 +1314,17 @@ fn git_operation_state(repo_path: String) -> Result<GitOperationState, String> {
         return Err(command_error("git rev-parse --git-dir", &git_dir_out));
     }
 
-    let git_dir_text = String::from_utf8_lossy(&git_dir_out.stdout).trim().to_string();
+    let git_dir_text = String::from_utf8_lossy(&git_dir_out.stdout)
+        .trim()
+        .to_string();
     let git_dir = if std::path::Path::new(&git_dir_text).is_absolute() {
         std::path::PathBuf::from(git_dir_text)
     } else {
         std::path::PathBuf::from(&repo_path).join(git_dir_text)
     };
 
-    let rebase_in_progress = git_dir.join("rebase-merge").exists() || git_dir.join("rebase-apply").exists();
+    let rebase_in_progress =
+        git_dir.join("rebase-merge").exists() || git_dir.join("rebase-apply").exists();
     let merge_in_progress = git_dir.join("MERGE_HEAD").exists();
     let cherry_pick_in_progress = git_dir.join("CHERRY_PICK_HEAD").exists();
     let revert_in_progress = git_dir.join("REVERT_HEAD").exists();
@@ -1140,7 +1337,10 @@ fn git_operation_state(repo_path: String) -> Result<GitOperationState, String> {
         .map_err(|e| e.to_string())?;
 
     if !conflict_out.status.success() {
-        return Err(command_error("git diff --name-only --diff-filter=U", &conflict_out));
+        return Err(command_error(
+            "git diff --name-only --diff-filter=U",
+            &conflict_out,
+        ));
     }
 
     let conflicted_files: Vec<String> = String::from_utf8_lossy(&conflict_out.stdout)
@@ -1156,7 +1356,8 @@ fn git_operation_state(repo_path: String) -> Result<GitOperationState, String> {
     } else if merge_in_progress {
         "Merge is in progress. Resolve or abort before starting another remote action.".to_string()
     } else if cherry_pick_in_progress {
-        "Cherry-pick is in progress. Resolve or abort before starting another remote action.".to_string()
+        "Cherry-pick is in progress. Resolve or abort before starting another remote action."
+            .to_string()
     } else if revert_in_progress {
         "Revert is in progress. Resolve or abort before starting another remote action.".to_string()
     } else {
@@ -1173,12 +1374,15 @@ fn git_operation_state(repo_path: String) -> Result<GitOperationState, String> {
     })
 }
 
-
 #[tauri::command]
 fn git_fetch_remote(repo_path: String) -> Result<String, String> {
     let upstream = current_upstream(&repo_path)?;
-    let remote = remote_name_from_upstream(&upstream)
-        .ok_or_else(|| format!("Could not determine remote name from upstream: {}", upstream))?;
+    let remote = remote_name_from_upstream(&upstream).ok_or_else(|| {
+        format!(
+            "Could not determine remote name from upstream: {}",
+            upstream
+        )
+    })?;
 
     let out = Command::new("git")
         .arg("-C")
@@ -1219,13 +1423,15 @@ fn git_push_preview(repo_path: String) -> Result<RemoteOperationPreview, String>
         commit_count: commits.len(),
         commits,
         changed_files,
-        consequence: "Preview only. No snapshots were uploaded. Working files were not changed.".to_string(),
+        consequence: "Preview only. No snapshots were uploaded. Working files were not changed."
+            .to_string(),
         warning: if ahead == 0 {
             "Nothing local is ahead of the upstream branch.".to_string()
         } else if behind > 0 {
             "Branch is diverged. Upload preview shows only local-only commits; it does not include remote-only work.".to_string()
         } else {
-            "Uploading would make these local snapshots visible on the configured remote.".to_string()
+            "Uploading would make these local snapshots visible on the configured remote."
+                .to_string()
         },
         merge_safety,
     })
@@ -1264,7 +1470,6 @@ fn git_pull_preview(repo_path: String) -> Result<RemoteOperationPreview, String>
         merge_safety,
     })
 }
-
 
 #[tauri::command]
 fn git_status(repo_path: String) -> Result<GitStatusResponse, String> {
@@ -1313,10 +1518,19 @@ fn git_status(repo_path: String) -> Result<GitStatusResponse, String> {
         }
     }
 
-    Ok(GitStatusResponse { branch, staged, working })
+    Ok(GitStatusResponse {
+        branch,
+        staged,
+        working,
+    })
 }
 
-fn run_git_path_action(repo_path: String, args: Vec<&str>, path: String, success: &str) -> Result<String, String> {
+fn run_git_path_action(
+    repo_path: String,
+    args: Vec<&str>,
+    path: String,
+    success: &str,
+) -> Result<String, String> {
     let out = Command::new("git")
         .arg("-C")
         .arg(&repo_path)
@@ -1408,13 +1622,17 @@ fn git_remove_untracked(repo_path: String, path: String) -> Result<String, Strin
         .map_err(|e| e.to_string())?;
 
     if !status_out.status.success() {
-        return Err(String::from_utf8_lossy(&status_out.stderr).trim().to_string());
+        return Err(String::from_utf8_lossy(&status_out.stderr)
+            .trim()
+            .to_string());
     }
 
     let status_text = String::from_utf8_lossy(&status_out.stdout);
 
     if !status_text.lines().any(|line| line.starts_with("?? ")) {
-        return Err("Remove blocked: ChronoGit only removes untracked files with this action.".into());
+        return Err(
+            "Remove blocked: ChronoGit only removes untracked files with this action.".into(),
+        );
     }
 
     let out = Command::new("git")
@@ -1460,14 +1678,18 @@ fn git_stage(repo_path: String, path: String) -> Result<String, String> {
 
 #[tauri::command]
 fn git_unstage(repo_path: String, path: String) -> Result<String, String> {
-    run_git_path_action(repo_path, vec!["restore", "--staged"], path, "Removed from next commit")
+    run_git_path_action(
+        repo_path,
+        vec!["restore", "--staged"],
+        path,
+        "Removed from next commit",
+    )
 }
 
 #[tauri::command]
 fn git_restore(repo_path: String, path: String) -> Result<String, String> {
     run_git_path_action(repo_path, vec!["restore"], path, "Restored")
 }
-
 
 #[tauri::command]
 fn git_commit_preflight(repo_path: String) -> Result<CommitPreflight, String> {
@@ -1541,10 +1763,15 @@ fn git_commit(repo_path: String, message: String) -> Result<CommitResult, String
         .map_err(|e| e.to_string())?;
 
     if !conflict_check.status.success() {
-        return Err(String::from_utf8_lossy(&conflict_check.stderr).trim().to_string());
+        return Err(String::from_utf8_lossy(&conflict_check.stderr)
+            .trim()
+            .to_string());
     }
 
-    if !String::from_utf8_lossy(&conflict_check.stdout).trim().is_empty() {
+    if !String::from_utf8_lossy(&conflict_check.stdout)
+        .trim()
+        .is_empty()
+    {
         return Err("Snapshot blocked: unresolved Git conflicts are present.".into());
     }
 
@@ -1568,7 +1795,9 @@ fn git_commit(repo_path: String, message: String) -> Result<CommitResult, String
         .map_err(|e| e.to_string())?;
 
     if !commit_out.status.success() {
-        return Err(String::from_utf8_lossy(&commit_out.stderr).trim().to_string());
+        return Err(String::from_utf8_lossy(&commit_out.stderr)
+            .trim()
+            .to_string());
     }
 
     let hash_out = Command::new("git")
@@ -1592,7 +1821,10 @@ fn git_commit(repo_path: String, message: String) -> Result<CommitResult, String
 }
 
 #[tauri::command]
-fn git_amend_latest_commit_message(repo_path: String, message: String) -> Result<CommitResult, String> {
+fn git_amend_latest_commit_message(
+    repo_path: String,
+    message: String,
+) -> Result<CommitResult, String> {
     let trimmed = message.trim();
 
     if trimmed.is_empty() {
@@ -1610,7 +1842,10 @@ fn git_amend_latest_commit_message(repo_path: String, message: String) -> Result
         return Err(command_error("git status --porcelain=v1", &status_out));
     }
 
-    if !String::from_utf8_lossy(&status_out.stdout).trim().is_empty() {
+    if !String::from_utf8_lossy(&status_out.stdout)
+        .trim()
+        .is_empty()
+    {
         return Err("Rename blocked: working tree is not clean. Commit or restore changes before amending the latest snapshot message.".into());
     }
 
@@ -1625,7 +1860,9 @@ fn git_amend_latest_commit_message(repo_path: String, message: String) -> Result
         return Err(command_error("git rev-parse --short HEAD", &old_hash_out));
     }
 
-    let old_hash = String::from_utf8_lossy(&old_hash_out.stdout).trim().to_string();
+    let old_hash = String::from_utf8_lossy(&old_hash_out.stdout)
+        .trim()
+        .to_string();
 
     let amend_out = Command::new("git")
         .arg("-C")
@@ -1647,14 +1884,19 @@ fn git_amend_latest_commit_message(repo_path: String, message: String) -> Result
         .map_err(|e| e.to_string())?;
 
     let new_hash = if new_hash_out.status.success() {
-        String::from_utf8_lossy(&new_hash_out.stdout).trim().to_string()
+        String::from_utf8_lossy(&new_hash_out.stdout)
+            .trim()
+            .to_string()
     } else {
         "unknown".to_string()
     };
 
     Ok(CommitResult {
         ok: true,
-        message: format!("Renamed latest snapshot message. Git commit hash changed: {} → {}", old_hash, new_hash),
+        message: format!(
+            "Renamed latest snapshot message. Git commit hash changed: {} → {}",
+            old_hash, new_hash
+        ),
         commit_hash: new_hash,
     })
 }
@@ -1678,7 +1920,10 @@ fn git_file_lineage(repo_path: String, path: String) -> Result<FileLineage, Stri
         .map_err(|e| e.to_string())?;
 
     if !out.status.success() {
-        return Err(command_error("git log --follow --name-status -- <path>", &out));
+        return Err(command_error(
+            "git log --follow --name-status -- <path>",
+            &out,
+        ));
     }
 
     let text = String::from_utf8_lossy(&out.stdout);
@@ -1825,7 +2070,10 @@ fn git_history(repo_path: String) -> Result<Vec<HistoryCommit>, String> {
 }
 
 #[tauri::command]
-fn git_changed_files_from_commit(repo_path: String, commit_hash: String) -> Result<Vec<ChangedFile>, String> {
+fn git_changed_files_from_commit(
+    repo_path: String,
+    commit_hash: String,
+) -> Result<Vec<ChangedFile>, String> {
     let range = format!("{}^!", commit_hash);
 
     let out = Command::new("git")
@@ -1857,7 +2105,11 @@ fn git_changed_files_from_commit(repo_path: String, commit_hash: String) -> Resu
 }
 
 #[tauri::command]
-fn git_diff_file_from_commit(repo_path: String, commit_hash: String, path: String) -> Result<DiffResult, String> {
+fn git_diff_file_from_commit(
+    repo_path: String,
+    commit_hash: String,
+    path: String,
+) -> Result<DiffResult, String> {
     validate_relative_path(&path)?;
     validate_commitish(&repo_path, &commit_hash)?;
 
@@ -1885,7 +2137,11 @@ fn git_diff_file_from_commit(repo_path: String, commit_hash: String, path: Strin
 }
 
 #[tauri::command]
-fn git_compare_commits(repo_path: String, left_commit: String, right_commit: String) -> Result<CommitComparison, String> {
+fn git_compare_commits(
+    repo_path: String,
+    left_commit: String,
+    right_commit: String,
+) -> Result<CommitComparison, String> {
     validate_commitish(&repo_path, &left_commit)?;
     validate_commitish(&repo_path, &right_commit)?;
 
@@ -2094,7 +2350,6 @@ struct OllamaTagDetails {
     quantization_level: Option<String>,
 }
 
-
 #[derive(Deserialize)]
 struct OllamaStreamChunk {
     response: Option<String>,
@@ -2119,7 +2374,10 @@ fn explain_prompt_with_ollama_stream(
     prompt: String,
 ) -> Result<ExplainDiffResult, String> {
     let local_models = list_local_llm_models("ollama".to_string())?;
-    if !local_models.iter().any(|local_model| local_model.name == model) {
+    if !local_models
+        .iter()
+        .any(|local_model| local_model.name == model)
+    {
         return Err(format!("Model blocked or unavailable locally: {}", model));
     }
 
@@ -2139,7 +2397,9 @@ fn explain_prompt_with_ollama_stream(
 
     if !response.status().is_success() {
         let status = response.status();
-        let body = response.text().unwrap_or_else(|_| "Could not read Ollama error body.".to_string());
+        let body = response
+            .text()
+            .unwrap_or_else(|_| "Could not read Ollama error body.".to_string());
         return Err(format!("Ollama API failed with {}: {}", status, body));
     }
 
@@ -2156,24 +2416,30 @@ fn explain_prompt_with_ollama_stream(
             .map_err(|e| format!("Could not parse Ollama stream chunk: {}", e))?;
 
         if let Some(error) = parsed.error {
-            let _ = window.emit("chronogit://llm-stream", LlmStreamEvent {
-                stream_id: stream_id.clone(),
-                chunk: String::new(),
-                done: true,
-                error: Some(error.clone()),
-            });
+            let _ = window.emit(
+                "chronogit://llm-stream",
+                LlmStreamEvent {
+                    stream_id: stream_id.clone(),
+                    chunk: String::new(),
+                    done: true,
+                    error: Some(error.clone()),
+                },
+            );
             return Err(error);
         }
 
         let chunk = parsed.response.unwrap_or_default();
         if !chunk.is_empty() {
             full.push_str(&chunk);
-            let _ = window.emit("chronogit://llm-stream", LlmStreamEvent {
-                stream_id: stream_id.clone(),
-                chunk,
-                done: false,
-                error: None,
-            });
+            let _ = window.emit(
+                "chronogit://llm-stream",
+                LlmStreamEvent {
+                    stream_id: stream_id.clone(),
+                    chunk,
+                    done: false,
+                    error: None,
+                },
+            );
         }
 
         if parsed.done.unwrap_or(false) {
@@ -2183,15 +2449,21 @@ fn explain_prompt_with_ollama_stream(
 
     let mut cleaned = clean_ollama_text(&full);
     if cleaned.is_empty() {
-        cleaned = format!("Local LLM finished, but returned no readable explanation for: {}", title);
+        cleaned = format!(
+            "Local LLM finished, but returned no readable explanation for: {}",
+            title
+        );
     }
 
-    let _ = window.emit("chronogit://llm-stream", LlmStreamEvent {
-        stream_id: stream_id.clone(),
-        chunk: String::new(),
-        done: true,
-        error: None,
-    });
+    let _ = window.emit(
+        "chronogit://llm-stream",
+        LlmStreamEvent {
+            stream_id: stream_id.clone(),
+            chunk: String::new(),
+            done: true,
+            error: None,
+        },
+    );
 
     Ok(ExplainDiffResult {
         model,
@@ -2215,31 +2487,47 @@ fn list_local_llm_models(engine: String) -> Result<Vec<LocalModel>, String> {
 
     if !response.status().is_success() {
         let status = response.status();
-        let body = response.text().unwrap_or_else(|_| "Could not read Ollama error body.".to_string());
-        return Err(format!("Ollama model query failed with {}: {}", status, body));
+        let body = response
+            .text()
+            .unwrap_or_else(|_| "Could not read Ollama error body.".to_string());
+        return Err(format!(
+            "Ollama model query failed with {}: {}",
+            status, body
+        ));
     }
 
     let parsed: OllamaTagsResponse = response
         .json()
         .map_err(|e| format!("Could not parse Ollama model list: {}", e))?;
 
-    let mut models: Vec<LocalModel> = parsed.models.into_iter().map(|model| {
-        let details = model.details;
-        LocalModel {
-            name: model.name,
-            engine: "ollama".to_string(),
-            size: model.size,
-            modified_at: model.modified_at,
-            family: details.as_ref().and_then(|d| d.family.clone()).unwrap_or_else(|| "unknown".to_string()),
-            parameter_size: details.as_ref().and_then(|d| d.parameter_size.clone()).unwrap_or_else(|| "unknown".to_string()),
-            quantization_level: details.and_then(|d| d.quantization_level).unwrap_or_else(|| "unknown".to_string()),
-        }
-    }).collect();
+    let mut models: Vec<LocalModel> = parsed
+        .models
+        .into_iter()
+        .map(|model| {
+            let details = model.details;
+            LocalModel {
+                name: model.name,
+                engine: "ollama".to_string(),
+                size: model.size,
+                modified_at: model.modified_at,
+                family: details
+                    .as_ref()
+                    .and_then(|d| d.family.clone())
+                    .unwrap_or_else(|| "unknown".to_string()),
+                parameter_size: details
+                    .as_ref()
+                    .and_then(|d| d.parameter_size.clone())
+                    .unwrap_or_else(|| "unknown".to_string()),
+                quantization_level: details
+                    .and_then(|d| d.quantization_level)
+                    .unwrap_or_else(|| "unknown".to_string()),
+            }
+        })
+        .collect();
 
     models.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(models)
 }
-
 
 fn command_error(command: &str, out: &std::process::Output) -> String {
     let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
@@ -2378,19 +2666,39 @@ fn summarize_lockfile_diff(diff: &str) -> String {
         let trimmed = line.trim();
 
         if trimmed.starts_with("+name = ") {
-            added_packages.push(trimmed.trim_start_matches("+name = ").trim_matches('"').to_string());
+            added_packages.push(
+                trimmed
+                    .trim_start_matches("+name = ")
+                    .trim_matches('"')
+                    .to_string(),
+            );
         }
 
         if trimmed.starts_with("-name = ") {
-            removed_packages.push(trimmed.trim_start_matches("-name = ").trim_matches('"').to_string());
+            removed_packages.push(
+                trimmed
+                    .trim_start_matches("-name = ")
+                    .trim_matches('"')
+                    .to_string(),
+            );
         }
 
         if trimmed.starts_with("+version = ") {
-            added_versions.push(trimmed.trim_start_matches("+version = ").trim_matches('"').to_string());
+            added_versions.push(
+                trimmed
+                    .trim_start_matches("+version = ")
+                    .trim_matches('"')
+                    .to_string(),
+            );
         }
 
         if trimmed.starts_with("-version = ") {
-            removed_versions.push(trimmed.trim_start_matches("-version = ").trim_matches('"').to_string());
+            removed_versions.push(
+                trimmed
+                    .trim_start_matches("-version = ")
+                    .trim_matches('"')
+                    .to_string(),
+            );
         }
     }
 
@@ -2435,7 +2743,10 @@ fn explain_context_with_ollama(
     raw_truth: String,
 ) -> Result<ExplainDiffResult, String> {
     let local_models = list_local_llm_models("ollama".to_string())?;
-    if !local_models.iter().any(|local_model| local_model.name == model) {
+    if !local_models
+        .iter()
+        .any(|local_model| local_model.name == model)
+    {
         return Err(format!("Model blocked or unavailable locally: {}", model));
     }
 
@@ -2512,11 +2823,14 @@ Raw truth:\n{}",
         })?;
 
     let tdp_reset_warning = set_gpu_power_limit(reset_limit).err();
-    let (tdp_reset_watts, _) = query_gpu_power_limits().unwrap_or_else(|_| ("unknown".to_string(), tdp_default_watts.clone()));
+    let (tdp_reset_watts, _) = query_gpu_power_limits()
+        .unwrap_or_else(|_| ("unknown".to_string(), tdp_default_watts.clone()));
 
     if !response.status().is_success() {
         let status = response.status();
-        let body = response.text().unwrap_or_else(|_| "Could not read Ollama error body.".to_string());
+        let body = response
+            .text()
+            .unwrap_or_else(|_| "Could not read Ollama error body.".to_string());
         return Err(format!("Ollama API failed with {}: {}", status, body));
     }
 
@@ -2534,11 +2848,17 @@ Raw truth:\n{}",
     }
 
     if let Some(warning) = tdp_set_warning {
-        cleaned = format!("[GPU TDP WARNING: could not set 60% power limit: {}]\n\n{}", warning, cleaned);
+        cleaned = format!(
+            "[GPU TDP WARNING: could not set 60% power limit: {}]\n\n{}",
+            warning, cleaned
+        );
     }
 
     if let Some(warning) = tdp_reset_warning {
-        cleaned = format!("[GPU TDP WARNING: could not reset power limit: {}]\n\n{}", warning, cleaned);
+        cleaned = format!(
+            "[GPU TDP WARNING: could not reset power limit: {}]\n\n{}",
+            warning, cleaned
+        );
     }
 
     Ok(ExplainDiffResult {
@@ -2559,7 +2879,10 @@ fn explain_diff_with_ollama(
     commit_message: String,
 ) -> Result<ExplainDiffResult, String> {
     let local_models = list_local_llm_models("ollama".to_string())?;
-    if !local_models.iter().any(|local_model| local_model.name == model) {
+    if !local_models
+        .iter()
+        .any(|local_model| local_model.name == model)
+    {
         return Err(format!("Model blocked or unavailable locally: {}", model));
     }
 
@@ -2658,11 +2981,14 @@ DIFF:\n{}",
         })?;
 
     let tdp_reset_warning = set_gpu_power_limit(reset_limit).err();
-    let (tdp_reset_watts, _) = query_gpu_power_limits().unwrap_or_else(|_| ("unknown".to_string(), tdp_default_watts.clone()));
+    let (tdp_reset_watts, _) = query_gpu_power_limits()
+        .unwrap_or_else(|_| ("unknown".to_string(), tdp_default_watts.clone()));
 
     if !response.status().is_success() {
         let status = response.status();
-        let body = response.text().unwrap_or_else(|_| "Could not read Ollama error body.".to_string());
+        let body = response
+            .text()
+            .unwrap_or_else(|_| "Could not read Ollama error body.".to_string());
         return Err(format!("Ollama API failed with {}: {}", status, body));
     }
 
@@ -2681,11 +3007,17 @@ DIFF:\n{}",
     }
 
     if let Some(warning) = tdp_set_warning {
-        cleaned = format!("[GPU TDP WARNING: could not set 60% power limit: {}]\n\n{}", warning, cleaned);
+        cleaned = format!(
+            "[GPU TDP WARNING: could not set 60% power limit: {}]\n\n{}",
+            warning, cleaned
+        );
     }
 
     if let Some(warning) = tdp_reset_warning {
-        cleaned = format!("[GPU TDP WARNING: could not reset power limit: {}]\n\n{}", warning, cleaned);
+        cleaned = format!(
+            "[GPU TDP WARNING: could not reset power limit: {}]\n\n{}",
+            warning, cleaned
+        );
     }
 
     Ok(ExplainDiffResult {
@@ -2696,8 +3028,6 @@ DIFF:\n{}",
         tdp_reset_watts,
     })
 }
-
-
 
 #[tauri::command]
 fn explain_comparison_with_ollama(
@@ -2711,7 +3041,10 @@ fn explain_comparison_with_ollama(
     diff: String,
 ) -> Result<ExplainDiffResult, String> {
     let local_models = list_local_llm_models("ollama".to_string())?;
-    if !local_models.iter().any(|local_model| local_model.name == model) {
+    if !local_models
+        .iter()
+        .any(|local_model| local_model.name == model)
+    {
         return Err(format!("Model blocked or unavailable locally: {}", model));
     }
 
@@ -2805,7 +3138,9 @@ DIFF:\n{}",
 
     if !response.status().is_success() {
         let status = response.status();
-        let body = response.text().unwrap_or_else(|_| "Could not read Ollama error body.".to_string());
+        let body = response
+            .text()
+            .unwrap_or_else(|_| "Could not read Ollama error body.".to_string());
         return Err(format!("Ollama API failed with {}: {}", status, body));
     }
 
@@ -2820,15 +3155,22 @@ DIFF:\n{}",
     let mut cleaned = clean_ollama_text(parsed.response.as_deref().unwrap_or(""));
 
     if cleaned.is_empty() {
-        cleaned = "Local LLM finished, but returned no readable comparison explanation.".to_string();
+        cleaned =
+            "Local LLM finished, but returned no readable comparison explanation.".to_string();
     }
 
     if let Some(warning) = tdp_set_warning {
-        cleaned = format!("[GPU TDP WARNING: could not set 60% power limit: {}]\n\n{}", warning, cleaned);
+        cleaned = format!(
+            "[GPU TDP WARNING: could not set 60% power limit: {}]\n\n{}",
+            warning, cleaned
+        );
     }
 
     if let Some(warning) = tdp_reset_warning {
-        cleaned = format!("[GPU TDP WARNING: could not reset power limit: {}]\n\n{}", warning, cleaned);
+        cleaned = format!(
+            "[GPU TDP WARNING: could not reset power limit: {}]\n\n{}",
+            warning, cleaned
+        );
     }
 
     Ok(ExplainDiffResult {
@@ -2840,7 +3182,6 @@ DIFF:\n{}",
     })
 }
 
-
 #[tauri::command]
 fn git_push_execute(repo_path: String, override_token: String) -> Result<RemotePushResult, String> {
     let _upstream = current_upstream(&repo_path)?;
@@ -2848,15 +3189,21 @@ fn git_push_execute(repo_path: String, override_token: String) -> Result<RemoteP
     let merge_safety = build_merge_safety_prediction(&repo_path)?;
 
     if ahead == 0 {
-        return Err("Upload blocked: this branch has no local snapshots ahead of the remote.".into());
+        return Err(
+            "Upload blocked: this branch has no local snapshots ahead of the remote.".into(),
+        );
     }
 
     if merge_safety.risk_level == "HIGH" && override_token.trim() != "override" {
         return Err("Upload blocked: HIGH risk requires typing override.".into());
     }
 
-    if (behind > 0 || merge_safety.risk_level == "MEDIUM") && !matches!(override_token.trim(), "confirm" | "override") {
-        return Err("Upload blocked: diverged or MEDIUM-risk upload requires explicit confirmation.".into());
+    if (behind > 0 || merge_safety.risk_level == "MEDIUM")
+        && !matches!(override_token.trim(), "confirm" | "override")
+    {
+        return Err(
+            "Upload blocked: diverged or MEDIUM-risk upload requires explicit confirmation.".into(),
+        );
     }
 
     let out = Command::new("git")
@@ -2872,7 +3219,8 @@ fn git_push_execute(repo_path: String, override_token: String) -> Result<RemoteP
     if out.status.success() {
         Ok(RemotePushResult {
             ok: true,
-            message: "Uploaded local snapshots with git push. Working files were not changed.".to_string(),
+            message: "Uploaded local snapshots with git push. Working files were not changed."
+                .to_string(),
             stdout,
             stderr,
         })
@@ -2885,9 +3233,11 @@ fn git_push_execute(repo_path: String, override_token: String) -> Result<RemoteP
     }
 }
 
-
 #[tauri::command]
-fn git_pull_rebase_execute(repo_path: String, override_token: String) -> Result<RemotePullResult, String> {
+fn git_pull_rebase_execute(
+    repo_path: String,
+    override_token: String,
+) -> Result<RemotePullResult, String> {
     let _upstream = current_upstream(&repo_path)?;
     let (ahead, behind) = ahead_behind_against_upstream(&repo_path)?;
     let merge_safety = build_merge_safety_prediction(&repo_path)?;
@@ -2949,9 +3299,12 @@ fn git_rebase_abort(repo_path: String) -> Result<String, String> {
     }
 }
 
-
 #[tauri::command]
-fn git_restore_file_from_commit(repo_path: String, commit_hash: String, path: String) -> Result<String, String> {
+fn git_restore_file_from_commit(
+    repo_path: String,
+    commit_hash: String,
+    path: String,
+) -> Result<String, String> {
     validate_relative_path(&path)?;
     validate_commitish(&repo_path, &commit_hash)?;
 
@@ -2969,7 +3322,6 @@ fn git_restore_file_from_commit(repo_path: String, commit_hash: String, path: St
         Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
     }
 }
-
 
 fn chronogit_log_backup_dir() -> Result<std::path::PathBuf, String> {
     if let Ok(raw) = std::env::var("CHRONOGIT_LOG_BACKUP_DIR") {
@@ -3057,7 +3409,6 @@ fn open_log_backup_folder() -> Result<String, String> {
     Ok(dir.to_string_lossy().to_string())
 }
 
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -3069,6 +3420,7 @@ pub fn run() {
             discover_git_repos,
             git_remote_status,
             git_branch_overview,
+            git_branch_graph,
             git_create_branch,
             git_switch_branch,
             git_operation_state,

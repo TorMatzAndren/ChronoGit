@@ -233,3 +233,26 @@ export type BranchOverview = {
   local_branches: BranchInfo[];
   remote_branches: BranchInfo[];
 };
+
+export type BranchGraphCommit = {
+  hash: string;
+  short_hash: string;
+  parents: string[];
+  refs: string[];
+  author: string;
+  date: string;
+  subject: string;
+  is_head: boolean;
+};
+
+export type BranchGraphRef = {
+  name: string;
+  full_name: string;
+  kind: "local" | "remote" | "tag" | "other";
+  target_short_hash: string;
+};
+
+export type BranchGraph = {
+  commits: BranchGraphCommit[];
+  refs: BranchGraphRef[];
+};

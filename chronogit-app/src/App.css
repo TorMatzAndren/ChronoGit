@@ -2733,10 +2733,10 @@ code {
   background: rgba(20, 184, 166, 0.14);
 }
 
-/* CHRONOGIT_BRANCH_PANEL_V1 */
+/* CHRONOGIT_BRANCH_PANEL_V2 */
 .branch-panel {
   display: grid;
-  gap: 12px;
+  gap: 8px;
 }
 
 .branch-panel__header {
@@ -2751,43 +2751,77 @@ code {
   margin: 0;
 }
 
+.branch-panel__header p,
+.branch-callout span,
+.branch-create-box span {
+  font-size: 0.74rem;
+  opacity: 0.72;
+}
+
 .branch-callout {
   display: grid;
-  gap: 4px;
-  border: 1px solid rgba(94, 234, 212, 0.25);
-  border-radius: 10px;
-  padding: 9px 10px;
-  background: rgba(15, 23, 42, 0.35);
+  gap: 2px;
+  border: 1px solid rgba(94, 234, 212, 0.22);
+  border-radius: 9px;
+  padding: 7px 9px;
+  background: rgba(15, 23, 42, 0.3);
 }
 
 .branch-callout--warning {
-  border-color: rgba(251, 191, 36, 0.45);
+  border-color: rgba(251, 191, 36, 0.42);
+}
+
+.branch-create-box {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(120px, 220px) auto;
+  gap: 8px;
+  align-items: center;
+  border: 1px solid rgba(94, 234, 212, 0.2);
+  border-radius: 9px;
+  padding: 7px 9px;
+  background: rgba(15, 23, 42, 0.28);
+}
+
+.branch-create-box div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.branch-create-box input {
+  min-width: 0;
 }
 
 .branch-panel__section {
   display: grid;
-  gap: 8px;
+  gap: 5px;
 }
 
 .branch-panel__section h4 {
   margin: 0;
+  font-size: 0.82rem;
 }
 
 .branch-row {
   display: grid;
-  grid-template-columns: minmax(160px, 1.2fr) 82px minmax(120px, 1fr) 92px;
-  gap: 8px;
+  grid-template-columns:
+    minmax(150px, 1.4fr)
+    74px
+    minmax(110px, 0.9fr)
+    minmax(120px, max-content)
+    auto;
+  gap: 7px;
   align-items: center;
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  border-radius: 10px;
-  padding: 8px 10px;
-  background: rgba(15, 23, 42, 0.28);
-  font-size: 0.78rem;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 8px;
+  padding: 5px 8px;
+  background: rgba(15, 23, 42, 0.24);
+  font-size: 0.73rem;
 }
 
 .branch-row--current {
-  border-color: rgba(94, 234, 212, 0.65);
-  box-shadow: inset 3px 0 0 rgba(94, 234, 212, 0.9);
+  border-color: rgba(94, 234, 212, 0.62);
+  box-shadow: inset 3px 0 0 rgba(94, 234, 212, 0.88);
 }
 
 .branch-row div,
@@ -2801,51 +2835,366 @@ code {
 
 .branch-row div {
   display: grid;
-  gap: 2px;
+  gap: 1px;
 }
 
 .branch-row div span {
-  opacity: 0.65;
-  font-size: 0.72rem;
+  opacity: 0.58;
+  font-size: 0.68rem;
 }
 
 .branch-row em {
   font-style: normal;
-  opacity: 0.82;
-}
-
-/* CHRONOGIT_BRANCH_CREATE_V1 */
-.branch-create-box {
-  display: grid;
-  grid-template-columns: minmax(220px, 1fr) minmax(140px, 220px) auto;
-  gap: 8px;
-  align-items: center;
-  border: 1px solid rgba(94, 234, 212, 0.24);
-  border-radius: 10px;
-  padding: 9px 10px;
-  background: rgba(15, 23, 42, 0.35);
-}
-
-.branch-create-box div {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-}
-
-.branch-create-box span {
-  opacity: 0.75;
-  font-size: 0.76rem;
-}
-
-.branch-create-box input {
-  min-width: 0;
-}
-
-/* CHRONOGIT_BRANCH_SWITCH_V1 */
-.branch-row {
-  grid-template-columns: minmax(150px, 1.2fr) 82px minmax(110px, 1fr) 92px auto;
+  opacity: 0.8;
 }
 
 .branch-row > button {
   white-space: nowrap;
+  padding-block: 3px;
+}
+
+/* CHRONOGIT_BRANCH_TOPOLOGY_V2 */
+.branch-graph {
+  display: grid;
+  gap: 7px;
+  border: 1px solid rgba(94, 234, 212, 0.2);
+  border-radius: 10px;
+  padding: 8px;
+  background: rgba(15, 23, 42, 0.24);
+}
+
+.branch-graph__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.branch-graph__header > div {
+  display: grid;
+  gap: 2px;
+}
+
+.branch-graph__header h4 {
+  margin: 0;
+  font-size: 0.82rem;
+}
+
+.branch-graph__header span {
+  opacity: 0.68;
+  font-size: 0.72rem;
+}
+
+.branch-graph__header strong {
+  white-space: nowrap;
+  opacity: 0.72;
+  font-size: 0.72rem;
+}
+
+.branch-topology-explainer {
+  display: grid;
+  grid-template-columns: 170px minmax(0, 1fr);
+  gap: 4px 10px;
+  border: 1px solid rgba(96, 165, 250, 0.2);
+  border-radius: 8px;
+  padding: 7px 9px;
+  background: rgba(30, 41, 59, 0.24);
+}
+
+.branch-topology-explainer strong {
+  color: rgb(191, 219, 254);
+  font-size: 0.72rem;
+}
+
+.branch-topology-explainer span {
+  opacity: 0.78;
+  font-size: 0.7rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.branch-topology {
+  --lane-width: 22px;
+  --lane-gap: 4px;
+  display: grid;
+  gap: 0;
+  overflow: auto;
+  max-height: 340px;
+  padding-right: 4px;
+}
+
+.branch-topology__lane-heads {
+  display: grid;
+  grid-template-columns: repeat(var(--branch-lanes), var(--lane-width));
+  gap: var(--lane-gap);
+  width: max-content;
+  margin-bottom: 4px;
+}
+
+.branch-lane-label {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  max-height: 76px;
+  min-height: 46px;
+  width: var(--lane-width);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 999px;
+  padding: 5px 2px;
+  text-align: center;
+  font-size: 0.62rem;
+  background: rgba(15, 23, 42, 0.48);
+}
+
+.branch-lane-label--local {
+  border-color: rgba(94, 234, 212, 0.42);
+}
+
+.branch-lane-label--remote {
+  border-color: rgba(96, 165, 250, 0.42);
+}
+
+.branch-topology-row {
+  display: grid;
+  grid-template-columns:
+    calc(var(--branch-lanes) * var(--lane-width) + (var(--branch-lanes) - 1) * var(--lane-gap))
+    minmax(0, 1fr);
+  gap: 7px;
+  min-width: 0;
+}
+
+.branch-topology-row__lanes {
+  display: grid;
+  grid-template-columns: repeat(var(--branch-lanes), var(--lane-width));
+  gap: var(--lane-gap);
+  min-height: 38px;
+  align-items: stretch;
+}
+
+.branch-topology-cell {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  color: rgba(94, 234, 212, 0.18);
+  font-size: 0.9rem;
+}
+
+.branch-topology-cell--active::before {
+  content: "";
+  position: absolute;
+  top: -7px;
+  bottom: -7px;
+  width: 2px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.38;
+}
+
+.branch-topology-cell--node::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  right: -14px;
+  top: 50%;
+  height: 2px;
+  transform: translateY(-50%);
+  background: currentColor;
+  opacity: 0.5;
+}
+
+.branch-topology-cell:nth-child(1) {
+  color: rgb(94, 234, 212);
+}
+
+.branch-topology-cell:nth-child(2) {
+  color: rgb(251, 191, 36);
+}
+
+.branch-topology-cell:nth-child(3) {
+  color: rgb(96, 165, 250);
+}
+
+.branch-topology-cell:nth-child(4) {
+  color: rgb(167, 139, 250);
+}
+
+.branch-topology-cell:nth-child(5) {
+  color: rgb(74, 222, 128);
+}
+
+.branch-topology-cell:nth-child(6) {
+  color: rgb(244, 114, 182);
+}
+
+.branch-topology-cell:nth-child(7) {
+  color: rgb(251, 146, 60);
+}
+
+.branch-topology-cell:nth-child(8) {
+  color: rgb(129, 140, 248);
+}
+
+.branch-topology-cell--node {
+  font-weight: 900;
+}
+
+.branch-topology-cell--head {
+  color: rgb(255, 230, 128);
+  text-shadow: 0 0 8px rgba(251, 191, 36, 0.55);
+}
+
+.branch-topology-cell--merge-left::before,
+.branch-topology-cell--merge-right::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  height: 2px;
+  background: currentColor;
+  opacity: 0.7;
+}
+
+.branch-topology-cell--merge-left::before {
+  left: -12px;
+  width: 12px;
+}
+
+.branch-topology-cell--merge-right::before {
+  right: -12px;
+  width: 12px;
+}
+
+.branch-topology-row__body {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  border-left: 1px solid rgba(94, 234, 212, 0.16);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+  padding: 5px 0 5px 8px;
+}
+
+.branch-topology-row--head .branch-topology-row__body {
+  border-left-color: rgba(251, 191, 36, 0.62);
+  background: linear-gradient(90deg, rgba(251, 191, 36, 0.07), transparent 70%);
+}
+
+.branch-topology-row__body > strong,
+.branch-topology-row__body > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.branch-topology-row__body > strong {
+  font-size: 0.76rem;
+}
+
+.branch-topology-row__body > span {
+  opacity: 0.65;
+  font-size: 0.68rem;
+}
+
+.branch-topology-row__top {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.branch-ref-pill {
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 999px;
+  padding: 1px 6px;
+  font-size: 0.62rem;
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.branch-ref-pill--local {
+  border-color: rgba(94, 234, 212, 0.45);
+}
+
+.branch-ref-pill--remote {
+  border-color: rgba(96, 165, 250, 0.45);
+}
+
+.branch-ref-pill--tag {
+  border-color: rgba(251, 191, 36, 0.45);
+}
+
+.branch-ref-pill--decorated {
+  opacity: 0.72;
+}
+
+.branch-ref-pill--merge {
+  border-color: rgba(216, 180, 254, 0.55);
+}
+
+/* CHRONOGIT_BRANCH_READABILITY_FIX_V1 */
+.branch-topology-explainer {
+  grid-template-columns: 1fr;
+}
+
+.branch-topology-explainer span {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.branch-topology__lane-heads {
+  grid-template-columns: repeat(var(--branch-lanes), minmax(92px, max-content));
+  gap: 6px;
+}
+
+.branch-topology-row {
+  grid-template-columns:
+    calc(var(--branch-lanes) * 92px + (var(--branch-lanes) - 1) * 6px)
+    minmax(0, 1fr);
+}
+
+.branch-topology-row__lanes {
+  grid-template-columns: repeat(var(--branch-lanes), minmax(92px, max-content));
+  gap: 6px;
+}
+
+.branch-lane-label {
+  writing-mode: horizontal-tb;
+  transform: none;
+  width: auto;
+  min-height: 0;
+  max-height: none;
+  max-width: 160px;
+  padding: 2px 7px;
+}
+
+/* CHRONOGIT_BRANCH_LANE_LABEL_READABILITY_V1 */
+.branch-lane-label {
+  display: grid;
+  gap: 1px;
+  align-content: center;
+  line-height: 1.05;
+}
+
+.branch-lane-label strong,
+.branch-lane-label em {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.branch-lane-label strong {
+  font-size: 0.58rem;
+  opacity: 0.72;
+  text-transform: uppercase;
+}
+
+.branch-lane-label em {
+  font-style: normal;
+  font-size: 0.66rem;
 }

@@ -1,15 +1,11 @@
-===== TRANSPORT HEADER (NOT PART OF FILE) =====
-PATH: scripts-chronogit-000001.md
-NOTE: Do NOT include this header in any saved documents.
-===============================================
 Title: App.tsx
 ID: scripts-chronogit-000001
 Date: 2026-05-04
 Author: Matz
 Type: scripts
 Subsystem: workspace-ui
-Updated: 2026-05-07
-Revision: 5
+Updated: 2026-05-08
+Revision: 7
 
 ---
 
@@ -25,6 +21,8 @@ Revision: 5
 @semantic:repository-selection
 @semantic:branch-awareness-ui
 @semantic:branch-switch-confirmation
+@semantic:git-branch-graph
+@semantic:branch-topology
 @semantic:commit-preflight
 @semantic:remote-awareness-ui
 @semantic:remote-preview-ui
@@ -42,9 +40,9 @@ Revision: 5
 # App.tsx
 
 **Date:** 2026-05-04  
-**Summary:** React root orchestration surface for ChronoGit. App.tsx owns top-level workspace state, repository selection, panel layout, auto-refresh, confirmation routing, branch overview/switch requests, commit preflight state, remote preview execution flow, persistent system/LLM logs, local LLM streaming, and delegation to extracted panel/component modules.  
-**Keywords:** chronogit app, react root, workspace panels, branch panel, git status, remote preview, commit preflight, persistent logs, local llm, tauri invoke  
-**Tags:** scripts, ui, git, workspace-ui, tauri, panels, branch-workflow, logs, llm
+**Summary:** React root orchestration surface for ChronoGit. App.tsx owns top-level workspace state, repository selection, panel layout, auto-refresh, confirmation routing, branch overview/graph/switch requests, commit preflight state, remote preview execution flow, persistent system/LLM logs, local LLM streaming, and delegation to extracted panel/component modules.  
+**Keywords:** chronogit app, react root, workspace panels, branch panel, branch graph, branch topology, git status, remote preview, commit preflight, persistent logs, local llm, tauri invoke  
+**Tags:** scripts, ui, git, workspace-ui, tauri, panels, branch-workflow, branch-graph, branch-topology, logs, llm
 
 Root frontend orchestration surface for ChronoGit.
 
@@ -62,6 +60,7 @@ It owns:
 - persisted workspace layout state
 - repository selection state
 - branch overview state
+- branch graph state
 - Git status / remote / operation-state refresh
 - confirmation modal routing
 - commit preflight modal routing
@@ -85,6 +84,7 @@ It coordinates these ChronoGit layers:
 - workspace layout state imported from `chronogitWorkspaceTypes`
 - panel projection surfaces
 - mutation confirmation paths
+- branch overview and branch graph refresh paths
 - remote preview and execution paths
 - local-only LLM advisory paths
 - persistent local log surfaces
@@ -145,6 +145,7 @@ Maintains runtime state for:
 - discovered repositories
 - remote status
 - branch overview
+- branch graph
 - interrupted Git operation state
 - local LLM models
 - selected LLM engine
@@ -228,6 +229,7 @@ Backup operations route through persistence helpers:
 - `loadRepos`
 - `loadLocalModels`
 - `loadBranchOverview`
+- `loadBranchGraph`
 
 Auto-refresh runs every 2500 ms.
 
@@ -264,9 +266,15 @@ It also appends a system log entry:
 
 Auto-refresh failures are logged as warnings.
 
+Important boundary:
+
+- Auto-refresh currently does not directly reload `branchGraph`.
+- Normal `refresh()` does reload branch overview and branch graph.
+- Initial load also loads branch graph.
+
 ---
 
-### 5. Git Status, Remote Status, and Operation State
+### 5. Git Status, Remote Status, Operation State, and Branch Graph
 
 `refresh()` calls backend commands directly through Tauri invoke:
 
@@ -280,6 +288,7 @@ It updates:
 - `remote`
 - `operationState`
 - branch overview through `loadBranchOverview`
+- branch graph through `loadBranchGraph`
 - last known state signature
 - Time Machine refresh tick
 
@@ -313,17 +322,36 @@ These labels are projection helpers. They do not replace backend truth.
 
 ---
 
-### 6. Branch Awareness and Branch Switching
+### 6. Branch Awareness, Branch Graph, and Branch Switching
 
-Maintains `branchOverview`.
+Maintains:
 
-Loads branch truth through direct backend command:
+- `branchOverview`
+- `branchGraph`
+
+Loads branch overview truth through direct backend command:
 
 - `git_branch_overview`
+
+Loads branch graph truth through direct backend command:
+
+- `git_branch_graph`
+
+`loadBranchGraph()`:
+
+- invokes `git_branch_graph`
+- stores result in `branchGraph`
+- clears graph to null on failure
+- logs branch graph failures as warnings
 
 Creates branches through direct backend command:
 
 - `git_create_branch`
+
+After branch creation, App.tsx reloads:
+
+- branch overview
+- branch graph
 
 Requests guarded branch switching through:
 
@@ -342,9 +370,12 @@ Actual branch switch command:
 
 - `git_switch_branch`
 
-After successful branch switch, App.tsx refreshes Git state and branch overview.
+After successful branch switch, App.tsx refreshes Git state and reloads:
 
-Branch display/action UI is delegated to:
+- branch overview
+- branch graph
+
+Branch display/action/topology UI is delegated to:
 
 - `BranchPanel`
 
@@ -652,6 +683,14 @@ Delegated active panels:
 - `LlmLogPanel`
 - `NotesPanel`
 
+The `branches` panel receives:
+
+- `branchOverview`
+- `branchGraph`
+- branch refresh callback
+- branch creation callback
+- guarded branch switch callback
+
 The `repository` and `git-status` panel types currently render placeholder text:
 
 - `This truth now lives in the title bar.`
@@ -707,6 +746,7 @@ Direct backend commands invoked in App.tsx:
 - `git_remote_status`
 - `git_operation_state`
 - `git_branch_overview`
+- `git_branch_graph`
 - `git_create_branch`
 - `git_switch_branch`
 - `list_local_llm_models`
@@ -759,6 +799,11 @@ Delegates Git action wrappers to:
 
 - `gitActions.ts`
 
+Delegates branch topology construction indirectly through:
+
+- `BranchPanel`
+- `branchTopology.ts`
+
 ---
 
 ## Truth, Projection, Mutation, and Advisory Boundaries
@@ -771,6 +816,7 @@ App.tsx treats backend Git command results as authoritative frontend truth input
 - remote status
 - operation state
 - branch overview
+- branch graph
 - repository discovery
 - local model discovery
 
@@ -787,8 +833,11 @@ Projection systems in this file include:
 - titlebar truth strip
 - panel rendering dispatcher
 - workspace canvas
+- branch graph dispatch into BranchPanel
 
 These are frontend projections derived from structured truth.
+
+Branch topology itself is delegated to `branchTopology.ts` and rendered by `BranchPanel.tsx`.
 
 ### Mutation Systems
 
@@ -855,6 +904,8 @@ Acts as:
 
 - root React runtime coordinator
 - Git state refresh coordinator
+- branch overview refresh coordinator
+- branch graph refresh coordinator
 - workspace layout owner
 - panel dispatcher
 - confirmation router
@@ -873,6 +924,8 @@ It no longer acts as the sole implementation site for all panels.
 
 - Git truth is fetched from backend commands.
 - UI panels are projections of deterministic state.
+- Branch graph truth is fetched from backend command `git_branch_graph`.
+- Branch topology rendering is delegated to BranchPanel and branchTopology.
 - Risky mutations are confirmed.
 - Destructive file actions are not performed directly without confirmation.
 - Local LLM output is advisory.
@@ -895,6 +948,10 @@ It no longer acts as the sole implementation site for all panels.
 
 `chronogit-app/src/assets/jarri-logo.png` is imported for the ChronoGit titlebar brand.
 
+### branchTopology.ts
+
+`chronogit-app/src/core/branchTopology.ts` transforms backend branch graph truth into branch topology projection data consumed by `BranchPanel.tsx`.
+
 ---
 
 ## Current Known Gaps
@@ -906,6 +963,7 @@ It no longer acts as the sole implementation site for all panels.
 - App.tsx still owns draggable panel mechanics directly.
 - Time Machine behavior is delegated, but App.tsx still owns refresh tick coordination.
 - `uiExplainBusy` is initialized as state but is not actively mutated in this file.
+- Auto-refresh does not directly reload branch graph when repository signatures change; normal refresh and branch refresh do.
 - Wrapper-owned backend command names must be documented from `gitActions.ts` and backend source, not from App.tsx assumptions.
 
 ---
@@ -913,6 +971,15 @@ It no longer acts as the sole implementation site for all panels.
 ## Verification Notes
 
 This document is based on full-file inspection of the supplied `src/App.tsx` source.
+
+This revision adds documentation for branch graph orchestration:
+
+- `BranchGraph` import
+- `branchGraph` state
+- `loadBranchGraph`
+- `git_branch_graph` direct invoke
+- branch graph refresh after branch creation and branch switching
+- branch graph delegation into `BranchPanel`
 
 The document intentionally distinguishes:
 
@@ -922,6 +989,7 @@ The document intentionally distinguishes:
 - mutation routing
 - preview routing
 - local LLM advisory routing
+- branch graph orchestration
 - delegated panel rendering
 
 Behavior not visible in App.tsx is not treated as proven here.

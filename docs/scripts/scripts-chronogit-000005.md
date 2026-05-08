@@ -4,8 +4,8 @@ Date: 2026-05-07
 Author: Matz
 Type: scripts
 Subsystem: workspace-ui
-Updated: 2026-05-07
-Revision: 1
+Updated: 2026-05-08
+Revision: 2
 
 ---
 
@@ -20,6 +20,8 @@ Revision: 1
 @semantic:git-operation-state
 @semantic:git-mutation
 @semantic:git-branching
+@semantic:git-branch-graph
+@semantic:branch-topology
 @semantic:commit-preflight
 @semantic:git-temporal
 @semantic:file-lineage
@@ -36,9 +38,9 @@ Revision: 1
 # chronogitRuntimeTypes.ts
 
 **Date:** 2026-05-07  
-**Summary:** Core frontend runtime type contract definitions for ChronoGit. Defines TypeScript structures for backend Git responses, remote state, branch state, Time Machine history/diff/lineage data, commit/preflight results, LLM streaming and explanation data, confirmation actions, and persistent system/LLM logs.  
-**Keywords:** runtime types, backend frontend contract, git status, remote preview, branch overview, file lineage, time machine, llm streaming, system log, confirmation action  
-**Tags:** scripts, types, workspace-ui, git, backend-contract, runtime-state, llm, logs
+**Summary:** Core frontend runtime type contract definitions for ChronoGit. Defines TypeScript structures for backend Git responses, remote state, branch state, branch graph state, Time Machine history/diff/lineage data, commit/preflight results, LLM streaming and explanation data, confirmation actions, and persistent system/LLM logs.  
+**Keywords:** runtime types, backend frontend contract, git status, remote preview, branch overview, branch graph, branch topology, file lineage, time machine, llm streaming, system log, confirmation action  
+**Tags:** scripts, types, workspace-ui, git, backend-contract, runtime-state, branch-graph, branch-topology, llm, logs
 
 Core frontend runtime type contract definitions for ChronoGit.
 
@@ -57,6 +59,7 @@ It describes structured data exchanged between:
 - log systems
 - LLM explanation systems
 - Time Machine systems
+- branch topology systems
 
 This file does not execute logic.
 
@@ -495,7 +498,7 @@ Optional fields:
 
 ---
 
-## Branch Types
+## Branch Overview Types
 
 ### BranchInfo
 
@@ -521,6 +524,68 @@ Defines total branch overview state:
 - `remote_branches`
 
 These types support ChronoGit branch awareness and branch switching UI.
+
+---
+
+## Branch Graph Types
+
+### BranchGraphCommit
+
+Defines branch graph commit metadata:
+
+- `hash`
+- `short_hash`
+- `parents`
+- `refs`
+- `author`
+- `date`
+- `subject`
+- `is_head`
+
+This structure represents commit graph data returned by the backend `git_branch_graph` command.
+
+`parents` stores full parent commit hashes.
+
+`refs` stores visible ref labels attached to the commit.
+
+`is_head` marks the commit currently pointed at by HEAD.
+
+---
+
+### BranchGraphRef
+
+Defines branch graph ref metadata:
+
+- `name`
+- `full_name`
+- `kind`
+- `target_short_hash`
+
+Allowed `kind` values:
+
+- `local`
+- `remote`
+- `tag`
+- `other`
+
+`target_short_hash` links the ref to the short hash of the commit it points at.
+
+This type supports deterministic branch-topology lane construction in `branchTopology.ts`.
+
+---
+
+### BranchGraph
+
+Defines total branch graph payload:
+
+- `commits`
+- `refs`
+
+`commits` contains the bounded commit window used by the branch topology projection.
+
+`refs` contains local, remote, tag, and other refs visible to the backend command.
+
+This type supports branch graph rendering in `BranchPanel.tsx` and topology transformation in `branchTopology.ts`.
 
 ---
 
@@ -563,6 +628,9 @@ Exports runtime contracts:
 - `LlmLogEntry`
 - `BranchInfo`
 - `BranchOverview`
+- `BranchGraphCommit`
+- `BranchGraphRef`
+- `BranchGraph`
 
 ---
 
@@ -577,6 +645,10 @@ It does not create truth by itself.
 ### Projection Systems
 
 These types support projected panels and modals by enforcing consistent data shape.
+
+Branch graph types support an additional projection layer:
+
+Backend branch graph payload → frontend runtime contract → branch topology transformation → branch panel graph rendering.
 
 ### Mutation Systems
 
@@ -631,7 +703,20 @@ Important differences visible in this frontend contract:
 - nullable frontend fields are represented as `string | null`
 - Rust `Option<String>` maps into TypeScript nullable fields
 - numeric Rust counts map into TypeScript `number`
+- Rust `Vec<T>` maps into TypeScript arrays
 - frontend confirmation callbacks are frontend-only and do not exist in backend Rust structs
+
+Branch graph type contracts correspond to backend structs:
+
+- `BranchGraphCommit`
+- `BranchGraphRef`
+- `BranchGraph`
+
+These are consumed by:
+
+- `App.tsx`
+- `BranchPanel.tsx`
+- `branchTopology.ts`
 
 This file should be kept synchronized with backend serialized response shapes.
 
@@ -650,6 +735,8 @@ The runtime model is:
 - LLM-advisory aware
 - preview-aware
 - safety-state aware
+- branch-graph aware
+- branch-topology compatible
 
 ---
 
@@ -669,6 +756,8 @@ Pure TypeScript type-definition file.
 - `GitRemoteStatus.remote` is both optional and nullable.
 - `GitRemoteStatus.is_clean` is optional even though backend currently returns it.
 - `SystemLogEntry` contains both `date` and `time`, while current logging may place the full timestamp in `date` and leave `time` empty.
+- `BranchGraphRef.kind` is narrowed, but many other Git classifications remain string-based.
+- `BranchGraphCommit.refs` stores string labels while rendered ref pills consume richer `BranchGraphRef` entries through topology mapping.
 - No runtime validators exist here.
 - No schema version is defined for these runtime contracts.
 
@@ -679,6 +768,12 @@ Pure TypeScript type-definition file.
 This document is based on full-file inspection of:
 
 - `src/core/chronogitRuntimeTypes.ts`
+
+This revision adds documentation for newly present branch graph runtime contracts:
+
+- `BranchGraphCommit`
+- `BranchGraphRef`
+- `BranchGraph`
 
 No behavior outside directly verified source has been documented.
 

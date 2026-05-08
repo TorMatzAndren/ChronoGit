@@ -4,8 +4,8 @@ Date: 2026-05-04
 Author: Matz
 Type: scripts
 Subsystem: control-api
-Updated: 2026-05-07
-Revision: 5
+Updated: 2026-05-08
+Revision: 6
 
 ---
 
@@ -18,6 +18,8 @@ Revision: 5
 @semantic:git-status
 @semantic:git-mutation
 @semantic:git-branching
+@semantic:git-branch-graph
+@semantic:branch-topology-source
 @semantic:git-remote-awareness
 @semantic:git-remote-preview
 @semantic:merge-safety-prediction
@@ -36,9 +38,9 @@ Revision: 5
 # lib.rs
 
 **Date:** 2026-05-04  
-**Summary:** Tauri backend execution and truth layer for ChronoGit. Provides controlled Git CLI execution, repository discovery, branch management, guarded remote operations, merge-safety prediction, Time Machine history/diff/lineage systems, file mutation commands, local Ollama integration, streamed LLM explanation events, GPU power-limit management for non-streaming LLM calls, and local backup persistence commands.  
-**Keywords:** tauri backend, git cli, remote preview, merge safety, branch switching, time machine, lineage, ollama, streaming llm, gpu tdp, backup persistence  
-**Tags:** scripts, backend, control-api, git, tauri, time-machine, remote-awareness, llm
+**Summary:** Tauri backend execution and truth layer for ChronoGit. Provides controlled Git CLI execution, repository discovery, branch management, branch graph extraction, guarded remote operations, merge-safety prediction, Time Machine history/diff/lineage systems, file mutation commands, local Ollama integration, streamed LLM explanation events, GPU power-limit management for non-streaming LLM calls, and local backup persistence commands.  
+**Keywords:** tauri backend, git cli, branch graph, remote preview, merge safety, branch switching, time machine, lineage, ollama, streaming llm, gpu tdp, backup persistence  
+**Tags:** scripts, backend, control-api, git, tauri, branch-graph, time-machine, remote-awareness, llm
 
 Controlled backend execution boundary for ChronoGit.
 
@@ -56,6 +58,7 @@ It provides the controlled boundary between:
 - OS integration commands
 - backup persistence surfaces
 - local file restoration workflows
+- branch graph extraction workflows
 
 The frontend never executes Git directly.
 
@@ -72,6 +75,7 @@ All authoritative Git interaction routes through this backend layer.
 - Git mutation layer
 - Time Machine backend
 - branch-management backend
+- branch graph truth source
 - remote preview/execution backend
 - merge-safety prediction layer
 - file-lineage backend
@@ -97,6 +101,9 @@ Defines serializable runtime structures used by the frontend:
 - `GitRemoteStatus`
 - `BranchInfo`
 - `BranchOverview`
+- `BranchGraphCommit`
+- `BranchGraphRef`
+- `BranchGraph`
 - `GitOperationState`
 
 ### Remote Operation Structures
@@ -143,6 +150,68 @@ Internal-only request/response parsing structures:
 - `OllamaStreamChunk`
 
 These are not frontend-facing UI truth models.
+
+---
+
+## Branch Graph Structures
+
+### BranchGraphCommit
+
+Defines commit graph data:
+
+- `hash`
+- `short_hash`
+- `parents`
+- `refs`
+- `author`
+- `date`
+- `subject`
+- `is_head`
+
+Purpose:
+
+Represents a commit row extracted from `git log --all` for branch topology projection.
+
+---
+
+### BranchGraphRef
+
+Defines ref graph data:
+
+- `name`
+- `full_name`
+- `kind`
+- `target_short_hash`
+
+Kind values are emitted as strings:
+
+- `local`
+- `remote`
+- `tag`
+- `other`
+
+Purpose:
+
+Represents refs from local branches, remote branches, and tags.
+
+---
+
+### BranchGraph
+
+Defines backend branch graph result:
+
+- `commits`
+- `refs`
+
+Purpose:
+
+Provides structured branch graph truth to the frontend.
+
+Consumed by:
+
+- `chronogitRuntimeTypes.ts`
+- `branchTopology.ts`
+- `BranchPanel.tsx`
 
 ---
 
@@ -314,6 +383,7 @@ Commands:
 - `git_create_branch`
 - `git_switch_branch`
 - `git_branch_overview`
+- `git_branch_graph`
 
 ---
 
@@ -419,6 +489,127 @@ Returns:
 Detached HEAD state creates a synthetic `BranchInfo` entry:
 
 - `DETACHED HEAD @ <hash>`
+
+---
+
+## Branch Graph Extraction
+
+Command:
+
+- `git_branch_graph`
+
+Purpose:
+
+Extracts bounded branch graph truth for frontend topology projection.
+
+This command is the backend source for the branch topology view.
+
+---
+
+### HEAD Detection
+
+Uses:
+
+- `git rev-parse HEAD`
+
+The resulting full hash is compared against each graph commit.
+
+Matching commit receives:
+
+- `is_head = true`
+
+If HEAD cannot be resolved, `head_hash` is empty and no commit is marked as HEAD.
+
+---
+
+### Commit Graph Extraction
+
+Uses:
+
+- `git log --all --max-count=80 --date=iso-strict --pretty=format:%H%x1f%h%x1f%P%x1f%D%x1f%an%x1f%ad%x1f%s%x1e`
+
+Extracts:
+
+- full hash
+- short hash
+- parent hashes
+- decoration refs
+- author name
+- ISO-strict author date
+- subject
+- HEAD marker
+
+Record separators:
+
+- field separator: `\x1f`
+- record separator: `\x1e`
+
+This avoids fragile whitespace parsing for commit metadata.
+
+---
+
+### Commit Graph Output
+
+Each parsed commit becomes:
+
+- `BranchGraphCommit`
+
+Malformed records with fewer than seven fields are skipped.
+
+Parent hashes are split from the `%P` field.
+
+Decoration refs are split from the `%D` field by comma.
+
+---
+
+### Ref Graph Extraction
+
+Uses:
+
+- `git for-each-ref --format=%(refname)|%(refname:short)|%(objectname:short) refs/heads refs/remotes refs/tags`
+
+Extracts refs from:
+
+- local heads
+- remote tracking refs
+- tags
+
+Skips symbolic remote HEAD rows whose short name ends with:
+
+- `/HEAD`
+
+---
+
+### Ref Kind Classification
+
+Ref kind is classified by full ref prefix:
+
+- `refs/heads/` → `local`
+- `refs/remotes/` → `remote`
+- `refs/tags/` → `tag`
+- everything else → `other`
+
+Each parsed ref becomes:
+
+- `BranchGraphRef`
+
+---
+
+### Branch Graph Output
+
+Returns:
+
+- `BranchGraph { commits, refs }`
+
+This output is consumed by frontend branch topology logic.
+
+Important boundary:
+
+- this backend command extracts raw graph truth
+- it does not assign visual lanes
+- it does not render graph rows
+- it does not infer branch topology summaries
+- those transformations happen in `branchTopology.ts`
 
 ---
 
@@ -741,7 +932,7 @@ Behavior:
 - verifies path is truly `??`
 - then executes:
 
-`git clean -f -- <path>`
+    git clean -f -- <path>
 
 ### Ignore Path
 
@@ -1212,6 +1403,7 @@ Registered surfaces include:
 - repository discovery
 - remote awareness
 - branch workflows
+- branch graph extraction
 - operation-state detection
 - file mutation
 - commit/preflight/amend
@@ -1280,6 +1472,12 @@ Executes:
 - local browser/folder opens
 - local Ollama inference requests
 
+Branch graph output is returned as:
+
+- `BranchGraph`
+
+for frontend topology projection.
+
 ---
 
 ## Truth, Projection, Mutation, and Advisory Boundaries
@@ -1290,14 +1488,26 @@ Git CLI output is authoritative.
 
 This backend extracts and structures Git truth.
 
+Branch graph truth is extracted from:
+
+- `git log --all`
+- `git for-each-ref`
+
+but visual lane topology is not computed here.
+
 ### Projection Systems
 
 Generated classifications and merge-safety predictions are projections layered on top of Git truth.
+
+Branch graph extraction is structured truth output.
+
+Branch topology projection is delegated to frontend `branchTopology.ts`.
 
 ### Mutation Systems
 
 Mutation commands include:
 
+- branch creation
 - branch switching
 - commit creation
 - commit amend
@@ -1322,6 +1532,7 @@ The prompts explicitly reinforce:
 
 - frontend never executes Git directly
 - branch names are validated before execution
+- branch graph is extracted as structured backend truth
 - paths are validated before file mutation
 - commit references are validated before historical access
 - remote preview is separated from remote execution
@@ -1342,6 +1553,9 @@ The prompts explicitly reinforce:
 
 - `git_switch_branch` still uses `git checkout` instead of `git switch`
 - self-repository switching is blocked instead of using controlled restart workflow
+- `git_branch_graph` is bounded to 80 commits
+- `git_branch_graph` extracts graph truth but does not compute visual topology
+- branch graph ref kind is serialized as a string rather than a Rust enum
 - GPU TDP control assumes NVIDIA + passwordless sudo
 - streaming LLM explanations bypass GPU TDP throttling
 - backup folder naming still references `log-backups` despite patch usage
@@ -1357,9 +1571,20 @@ This document is based on full-file inspection of:
 
 - `src-tauri/src/lib.rs`
 
+This revision adds documentation for:
+
+- `BranchGraphCommit`
+- `BranchGraphRef`
+- `BranchGraph`
+- `git_branch_graph`
+- branch graph command registration
+- branch graph truth/projection boundary
+
 The document intentionally distinguishes:
 
 - authoritative Git truth extraction
+- branch graph extraction
+- frontend topology projection
 - projection/advisory logic
 - mutation boundaries
 - prediction systems
