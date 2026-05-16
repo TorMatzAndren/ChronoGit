@@ -3953,3 +3953,14 @@ code {
     grid-template-columns: 1fr;
   }
 }
+
+/* CHRONOGIT_MERGE_LLM_REVIEW_ACTIONS_V1 */
+.merge-review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.merge-review-actions button {
+  font-size: 0.7rem;
+}

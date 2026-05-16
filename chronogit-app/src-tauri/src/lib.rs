@@ -3495,6 +3495,154 @@ DIFF:\n{}",
 }
 
 #[tauri::command]
+fn explain_merge_risk_with_ollama(
+    model: String,
+    current_branch: String,
+    incoming_branch: String,
+    mode: String,
+    risk_level: String,
+    shared_files_text: String,
+    changed_files_text: String,
+    diff: String,
+) -> Result<ExplainDiffResult, String> {
+    let local_models = list_local_llm_models("ollama".to_string())?;
+    if !local_models.iter().any(|local_model| local_model.name == model) {
+        return Err(format!("Model blocked or unavailable locally: {}", model));
+    }
+
+    if diff.trim().is_empty() {
+        return Err("No structured merge preview available to explain.".into());
+    }
+
+    let (tdp_before_watts, tdp_default_watts) = query_gpu_power_limits()?;
+
+    let default_limit = tdp_default_watts
+        .split_whitespace()
+        .next()
+        .ok_or("Could not parse GPU default power limit.")?
+        .parse::<f32>()
+        .map_err(|e| format!("Could not parse GPU default power limit: {}", e))?;
+
+    let active_limit = (default_limit * 0.60).round() as u32;
+    let reset_limit = default_limit.round() as u32;
+
+    let tdp_set_warning = set_gpu_power_limit(active_limit).err();
+
+    let clipped_shared: String = shared_files_text.chars().take(6000).collect();
+    let clipped_files: String = changed_files_text.chars().take(8000).collect();
+    let clipped_diff: String = diff.chars().take(22000).collect();
+
+    let prompt = format!(
+        "/no_think\n\
+You are ChronoGit's merge-risk assistant.\n\
+Return ONLY the final explanation. Do not include thinking, prelude, self-talk, or reasoning narration.\n\
+Your only job is to explain a pending Git merge for a beginner.\n\
+Do NOT give Docker advice, implementation advice, deployment advice, refactoring advice, or generic project advice.\n\
+Do NOT propose code changes unless they are directly required to resolve a visible merge conflict.\n\
+Do NOT invent conflict details that are not visible in the supplied diff.\n\n\
+Use this exact format:\n\
+Summary:\n\
+- ...\n\n\
+What will happen if merged:\n\
+- ...\n\n\
+Conflict risk:\n\
+- ...\n\n\
+Files to review first:\n\
+- ...\n\n\
+Beginner explanation:\n\
+- ...\n\n\
+Do not infer:\n\
+- ...\n\n\
+Hard rules:\n\
+- Explain only this pending merge.\n\
+- Current branch receives incoming branch.\n\
+- Supplied ChronoGit merge preview is evidence; the LLM explanation is advisory.\n\
+- No raw code diff is supplied here. If exact conflict lines are not visible, say: exact conflict lines are not visible in this structured preview.\n\
+- Shared touched files mean both branches touched the same paths; they do not guarantee conflicts.\n\
+- Keep it practical and concise.\n\n\
+Merge metadata:\n\
+Current branch receiving changes: {}\n\
+Incoming branch being merged in: {}\n\
+Merge mode: {}\n\
+ChronoGit risk label: {}\n\n\
+Shared touched files:\n{}\n\n\
+Changed files:\n{}\n\n\
+MERGE DIFF PREVIEW:\n{}",
+        current_branch,
+        incoming_branch,
+        mode,
+        risk_level,
+        if clipped_shared.trim().is_empty() { "- none visible".to_string() } else { clipped_shared },
+        if clipped_files.trim().is_empty() { "- none visible".to_string() } else { clipped_files },
+        clipped_diff
+    );
+
+    let request = OllamaGenerateRequest {
+        model: model.clone(),
+        prompt,
+        stream: false,
+    };
+
+    let response = reqwest::blocking::Client::new()
+        .post("http://127.0.0.1:11434/api/generate")
+        .json(&request)
+        .send()
+        .map_err(|e| {
+            let _ = set_gpu_power_limit(reset_limit);
+            format!("Could not call local Ollama API: {}", e)
+        })?;
+
+    let tdp_reset_warning = set_gpu_power_limit(reset_limit).err();
+    let (tdp_reset_watts, _) = query_gpu_power_limits()
+        .unwrap_or_else(|_| ("unknown".to_string(), tdp_default_watts.clone()));
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response
+            .text()
+            .unwrap_or_else(|_| "Could not read Ollama error body.".to_string());
+        return Err(format!("Ollama API failed with {}: {}", status, body));
+    }
+
+    let parsed: OllamaGenerateResponse = response
+        .json()
+        .map_err(|e| format!("Could not parse Ollama API response: {}", e))?;
+
+    if let Some(error) = parsed.error {
+        return Err(error);
+    }
+
+    let mut cleaned = clean_ollama_text(parsed.response.as_deref().unwrap_or(""));
+
+    if cleaned.is_empty() {
+        cleaned = "Local LLM finished, but returned no readable merge-risk explanation.".to_string();
+    }
+
+    if let Some(warning) = tdp_set_warning {
+        cleaned = format!(
+            "[GPU TDP WARNING: could not set 60% power limit: {}]\n\n{}",
+            warning, cleaned
+        );
+    }
+
+    if let Some(warning) = tdp_reset_warning {
+        cleaned = format!(
+            "[GPU TDP WARNING: could not reset power limit: {}]\n\n{}",
+            warning, cleaned
+        );
+    }
+
+    Ok(ExplainDiffResult {
+        model,
+        explanation: cleaned,
+        tdp_before_watts,
+        tdp_active_watts: active_limit.to_string(),
+        tdp_reset_watts,
+    })
+}
+
+
+#[tauri::command]
 fn explain_comparison_with_ollama(
     model: String,
     left_label: String,
@@ -3918,6 +4066,7 @@ pub fn run() {
             explain_context_with_ollama,
             explain_prompt_with_ollama_stream,
             explain_comparison_with_ollama,
+            explain_merge_risk_with_ollama,
             list_local_llm_models,
             git_restore_file_from_commit
         ])

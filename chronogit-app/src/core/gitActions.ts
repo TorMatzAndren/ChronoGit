@@ -6,6 +6,8 @@ import type {
   BranchMergePreview,
   BranchMergeResult,
   BranchRelationshipPreview,
+  CommitComparison,
+  ExplainDiffResult,
   GitRemoteStatus,
   GitStatusResponse,
   RemoteOperationPreview,
@@ -181,3 +183,68 @@ export async function refreshGitState(
     remoteResult,
   };
 }
+
+
+export async function compareCommits(
+  repoPath: string,
+  leftCommit: string,
+  rightCommit: string,
+): Promise<CommitComparison> {
+  return invoke<CommitComparison>(
+    "git_compare_commits",
+    {
+      repoPath,
+      leftCommit,
+      rightCommit,
+    },
+  );
+}
+
+export async function explainComparisonWithOllama(
+  model: string,
+  comparison: CommitComparison,
+): Promise<ExplainDiffResult> {
+  return invoke<ExplainDiffResult>(
+    "explain_comparison_with_ollama",
+    {
+      model,
+      leftLabel: comparison.left_label,
+      rightLabel: comparison.right_label,
+      fileCount: comparison.changed_files.length,
+      insertions: comparison.insertions,
+      deletions: comparison.deletions,
+      changedFilesText: comparison.changed_files
+        .map((file) => `${file.status}\t${file.path}`)
+        .join("\n"),
+      diff: comparison.diff,
+    },
+  );
+}
+
+export async function explainMergeRiskWithOllama(
+  model: string,
+  args: {
+    currentBranch: string;
+    incomingBranch: string;
+    mode: string;
+    riskLevel: string;
+    sharedFilesText: string;
+    changedFilesText: string;
+    diff: string;
+  },
+): Promise<ExplainDiffResult> {
+  return invoke<ExplainDiffResult>(
+    "explain_merge_risk_with_ollama",
+    {
+      model,
+      currentBranch: args.currentBranch,
+      incomingBranch: args.incomingBranch,
+      mode: args.mode,
+      riskLevel: args.riskLevel,
+      sharedFilesText: args.sharedFilesText,
+      changedFilesText: args.changedFilesText,
+      diff: args.diff,
+    },
+  );
+}
+

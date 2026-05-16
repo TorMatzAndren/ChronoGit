@@ -2,8 +2,8 @@ import { useMemo, useState, type ReactNode } from "react";
 import { buildBranchTopology } from "../core/branchTopology";
 import { ChronoDropdown } from "../components/ChronoDropdown";
 import { HelpHint } from "../components/HelpHint";
-import { executeBranchMerge, inspectBranchRelationship, previewBranchMerge } from "../core/gitActions";
-import type { BranchGraph, BranchInfo, BranchMergePreview, BranchOverview, BranchRelationshipPreview } from "../core/chronogitRuntimeTypes";
+import { compareCommits, executeBranchMerge, explainMergeRiskWithOllama, inspectBranchRelationship, previewBranchMerge } from "../core/gitActions";
+import type { BranchGraph, BranchInfo, BranchMergePreview, BranchOverview, BranchRelationshipPreview, LlmLogEntry } from "../core/chronogitRuntimeTypes";
 import type { PanelType } from "../core/chronogitWorkspaceTypes";
 
 type Props = {
@@ -15,6 +15,8 @@ type Props = {
   createBranch: (branchName: string) => Promise<void>;
   requestSwitchBranch: (branch: BranchInfo) => void;
   openOrAddPanel: (type: PanelType) => void;
+  llmModel: string;
+  appendLlmEntry: (entry: Omit<LlmLogEntry, "id" | "timestamp">) => void;
   ui: (beginnerMode: boolean, beginner: string, pro: string) => string;
 };
 
@@ -416,6 +418,8 @@ export function BranchPanel({
   createBranch,
   requestSwitchBranch,
   openOrAddPanel,
+  llmModel,
+  appendLlmEntry,
   ui,
 }: Props) {
   const [branchName, setBranchName] = useState("");
@@ -428,6 +432,7 @@ export function BranchPanel({
   const [relationship, setRelationship] = useState<BranchRelationshipPreview | null>(null);
   const [mergePreviewBusy, setMergePreviewBusy] = useState(false);
   const [mergeExecuteBusy, setMergeExecuteBusy] = useState(false);
+  const [mergeExplainBusy, setMergeExplainBusy] = useState(false);
   const [mergeError, setMergeError] = useState("");
   const [mergeConfirmation, setMergeConfirmation] = useState("");
   const [mergePreview, setMergePreview] = useState<BranchMergePreview | null>(null);
@@ -491,6 +496,70 @@ export function BranchPanel({
       setMergeError(String(err));
     } finally {
       setMergePreviewBusy(false);
+    }
+  }
+
+
+  async function explainMergeRisk() {
+    if (!mergePreview || !llmModel) return;
+
+    try {
+      setMergeExplainBusy(true);
+      setMergeError("");
+
+      const comparison = await compareCommits(
+        repoPath,
+        mergePreview.current_branch,
+        mergePreview.target_branch,
+      );
+
+      const result = await explainMergeRiskWithOllama(llmModel, {
+        currentBranch: mergePreview.current_branch,
+        incomingBranch: mergePreview.target_branch,
+        mode: mergePreview.mode,
+        riskLevel: mergePreview.risk_level,
+        sharedFilesText: mergePreview.relationship.shared_touched_files.join("\n"),
+        changedFilesText: comparison.changed_files
+          .map((file) => `${file.status}\t${file.path}`)
+          .join("\n"),
+        diff: [
+          "CHRONOGIT MERGE RISK STRUCTURED PREVIEW ONLY",
+          "No raw code diff is supplied for this request.",
+          "Explain the merge shape and review priorities from the structured facts below.",
+          "",
+          `Current branch receiving changes: ${mergePreview.current_branch}`,
+          `Incoming branch being merged in: ${mergePreview.target_branch}`,
+          `Merge mode: ${mergePreview.mode}`,
+          `ChronoGit risk label: ${mergePreview.risk_level}`,
+          `Changed files: ${comparison.changed_files.length}`,
+          `Insertions: ${comparison.insertions}`,
+          `Deletions: ${comparison.deletions}`,
+          `Shared touched files: ${mergePreview.relationship.shared_touched_files.length}`,
+          "",
+          "Shared touched files:",
+          mergePreview.relationship.shared_touched_files.length
+            ? mergePreview.relationship.shared_touched_files.map((file) => `- ${file}`).join("\n")
+            : "- none visible",
+          "",
+          "Changed files:",
+          comparison.changed_files.length
+            ? comparison.changed_files.map((file) => `- ${file.status}\t${file.path}`).join("\n")
+            : "- none visible",
+        ].join("\n"),
+      });
+
+      appendLlmEntry({
+        source: "diff",
+        model: result.model,
+        title: `Merge risk explanation: ${mergePreview.current_branch} ← ${mergePreview.target_branch}`,
+        content: result.explanation || "Local LLM returned an empty merge-risk explanation.",
+      });
+
+      openOrAddPanel("llm-log");
+    } catch (err) {
+      setMergeError(`Merge explanation failed: ${err}`);
+    } finally {
+      setMergeExplainBusy(false);
     }
   }
 
@@ -887,6 +956,32 @@ export function BranchPanel({
                 </section>
               ) : null}
             </section>
+
+            {mergePreview.relationship.shared_touched_files.length ? (
+              <section className="merge-action-recommendations">
+                <strong>Shared files deserve review</strong>
+                <span>
+                  Both timelines changed some of the same files. This does not always mean a conflict, but it is worth inspecting before merge.
+                </span>
+                <div className="merge-review-actions">
+                  <button
+                    type="button"
+                    disabled={!llmModel || mergeExplainBusy}
+                    onClick={() => { void explainMergeRisk(); }}
+                  >
+                    {mergeExplainBusy
+                      ? "Asking local LLM..."
+                      : llmModel
+                        ? `Ask ${llmModel} to explain merge risk`
+                        : "No local LLM selected"}
+                  </button>
+
+                  <button type="button" onClick={() => openOrAddPanel("time-machine")}>
+                    Open Time Machine for manual inspection
+                  </button>
+                </div>
+              </section>
+            ) : null}
 
             {mergePreview.blockers.length ? (
               <div className="relationship-evidence relationship-evidence--important">

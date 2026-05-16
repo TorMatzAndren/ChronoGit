@@ -943,6 +943,8 @@ ${context.rawTruth.slice(0, 12000)}`;
           createBranch={createBranch}
           requestSwitchBranch={requestSwitchBranch}
           openOrAddPanel={openOrAddPanel}
+          llmModel={llmModel}
+          appendLlmEntry={appendLlmEntry}
           ui={ui}
         />
       );
