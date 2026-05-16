@@ -1,6 +1,7 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { buildBranchTopology } from "../core/branchTopology";
 import { ChronoDropdown } from "../components/ChronoDropdown";
+import { HelpHint } from "../components/HelpHint";
 import { inspectBranchRelationship } from "../core/gitActions";
 import type { BranchGraph, BranchInfo, BranchOverview, BranchRelationshipPreview } from "../core/chronogitRuntimeTypes";
 
@@ -509,7 +510,16 @@ export function BranchPanel({
           <section className={`branch-relationship-result branch-relationship-result--${relationship.risk_level.toLowerCase()}`}>
             <div className="relationship-verdict-card">
               <div>
-                <span className="cg-eyebrow">Relationship verdict</span>
+                <div className="relationship-heading-row">
+                  <span className="cg-eyebrow">Relationship verdict</span>
+
+                  <HelpHint
+                    title="What is a branch relationship?"
+                    compact
+                  >
+                    ChronoGit compares two branches and explains whether one can safely move forward, whether both have separate work, and whether Git may have trouble combining them.
+                  </HelpHint>
+                </div>
                 <h3>{relationshipVerdictTitle(relationship)}</h3>
                 <p>{relationship.summary}</p>
               </div>
@@ -558,7 +568,16 @@ export function BranchPanel({
                 }
               >
                 <strong>{relationship.shared_touched_files.length}</strong>
-                <span>shared touched paths</span>
+                <span>
+                  shared touched paths
+
+                  <HelpHint
+                    title="What are shared touched paths?"
+                    compact
+                  >
+                    These are files changed on both branches. Git may have trouble combining those changes automatically, so they deserve extra attention.
+                  </HelpHint>
+                </span>
                 <em>{relationshipMetricExplanation("shared")}</em>
               </div>
 
@@ -573,7 +592,16 @@ export function BranchPanel({
             </div>
 
             <section className="relationship-beginner-box">
-              <strong>What this means in practice</strong>
+              <div className="relationship-heading-row">
+                <strong>What this means in practice</strong>
+
+                <HelpHint
+                  title="Why does ChronoGit explain this?"
+                  compact
+                >
+                  ChronoGit tries to explain what Git is likely to do in plain language, instead of only showing hashes, counts, and technical labels.
+                </HelpHint>
+              </div>
               <span>{relationshipBeginnerSummary(relationship)}</span>
             </section>
 

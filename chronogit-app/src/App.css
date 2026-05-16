@@ -3631,3 +3631,114 @@ code {
   font-size: 0.75rem;
   line-height: 1.45;
 }
+
+/* CHRONOGIT_HELP_HINT_V1 */
+.cg-help-hint {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.cg-help-hint__button {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: 1px solid rgba(140, 180, 255, 0.34);
+  background: rgba(90, 140, 255, 0.12);
+  color: #cfe3ff;
+  cursor: pointer;
+  font-size: 0.68rem;
+  font-weight: 900;
+  line-height: 1;
+  padding: 0;
+}
+
+.cg-help-hint__button:hover {
+  background: rgba(90, 140, 255, 0.22);
+}
+
+.cg-help-hint__popup {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  width: min(340px, 72vw);
+  display: grid;
+  gap: 7px;
+  padding: 10px 11px;
+  border-radius: 11px;
+  border: 1px solid rgba(120, 170, 255, 0.30);
+  background: #0f1724;
+  box-shadow:
+    0 16px 38px rgba(0, 0, 0, 0.48);
+  z-index: 9000;
+}
+
+.cg-help-hint__popup strong {
+  color: #e6f1ff;
+  font-size: 0.76rem;
+}
+
+.cg-help-hint__popup div {
+  color: #b7c8d9;
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.cg-help-hint--compact .cg-help-hint__button {
+  width: 16px;
+  height: 16px;
+  font-size: 0.62rem;
+}
+
+.relationship-heading-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+
+/* CHRONOGIT_HELP_HINT_READABILITY_FIX_V1 */
+.cg-help-hint--right .cg-help-hint__popup {
+  left: auto;
+  right: 0;
+}
+
+.cg-help-hint__popup {
+  opacity: 1;
+  backdrop-filter: none;
+  border-color: rgba(120, 170, 255, 0.52);
+}
+
+.relationship-metric-card .cg-help-hint__popup {
+  left: auto;
+  right: 0;
+}
+
+/* CHRONOGIT_HELP_HINT_OPAQUE_STACK_FIX_V2 */
+.cg-help-hint {
+  z-index: 50;
+}
+
+.cg-help-hint:has(.cg-help-hint__popup) {
+  z-index: 20000;
+}
+
+.cg-help-hint__popup {
+  z-index: 20000 !important;
+  background: #0b1220 !important;
+  background-color: #0b1220 !important;
+  opacity: 1 !important;
+  isolation: isolate;
+  box-shadow:
+    0 0 0 1px rgba(120, 170, 255, 0.45),
+    0 18px 44px rgba(0, 0, 0, 0.78) !important;
+}
+
+.cg-help-hint__popup::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: 11px;
+  background: #0b1220;
+}
