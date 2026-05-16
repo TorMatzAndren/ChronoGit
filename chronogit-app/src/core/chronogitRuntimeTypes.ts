@@ -256,3 +256,30 @@ export type BranchGraph = {
   commits: BranchGraphCommit[];
   refs: BranchGraphRef[];
 };
+
+
+export type BranchRelationshipPreview = {
+  repo_path: string;
+  left_branch: string;
+  right_branch: string;
+  left_head: string;
+  right_head: string;
+  merge_base: string;
+  left_only_commits: string[];
+  right_only_commits: string[];
+  left_only_files: string[];
+  right_only_files: string[];
+  shared_touched_files: string[];
+  insertions: number;
+  deletions: number;
+  left_ahead: number;
+  right_ahead: number;
+  can_fast_forward_left: boolean;
+  can_fast_forward_right: boolean;
+  classification: string;
+  risk_level: string;
+  working_changes: number;
+  summary: string;
+  warning: string;
+};
+

@@ -82,6 +82,32 @@ struct BranchGraph {
 }
 
 #[derive(Serialize)]
+struct BranchRelationshipPreview {
+    repo_path: String,
+    left_branch: String,
+    right_branch: String,
+    left_head: String,
+    right_head: String,
+    merge_base: String,
+    left_only_commits: Vec<String>,
+    right_only_commits: Vec<String>,
+    left_only_files: Vec<String>,
+    right_only_files: Vec<String>,
+    shared_touched_files: Vec<String>,
+    insertions: i32,
+    deletions: i32,
+    left_ahead: usize,
+    right_ahead: usize,
+    can_fast_forward_left: bool,
+    can_fast_forward_right: bool,
+    classification: String,
+    risk_level: String,
+    working_changes: usize,
+    summary: String,
+    warning: String,
+}
+
+#[derive(Serialize)]
 struct GitOperationState {
     rebase_in_progress: bool,
     merge_in_progress: bool,
@@ -1274,6 +1300,178 @@ fn build_merge_safety_prediction(repo_path: &str) -> Result<MergeSafetyPredictio
         remote_files: remote_paths.into_iter().collect(),
         shared_files,
         working_changes,
+        warning,
+    })
+}
+
+
+fn rev_parse_commit(repo_path: &str, reference: &str) -> Result<String, String> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(repo_path)
+        .args(["rev-parse", "--verify"])
+        .arg(format!("{}^{{commit}}", reference))
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if out.status.success() {
+        Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    } else {
+        Err(format!("Invalid branch or commit reference: {}", reference))
+    }
+}
+
+fn merge_base(repo_path: &str, left: &str, right: &str) -> Result<String, String> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(repo_path)
+        .args(["merge-base", left, right])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if out.status.success() {
+        Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    } else {
+        Err(command_error("git merge-base <left> <right>", &out))
+    }
+}
+
+fn diff_numstat(repo_path: &str, left: &str, right: &str) -> Result<(i32, i32), String> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(repo_path)
+        .args(["diff", "--numstat"])
+        .arg(left)
+        .arg(right)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !out.status.success() {
+        return Err(command_error("git diff --numstat <left> <right>", &out));
+    }
+
+    let mut insertions = 0;
+    let mut deletions = 0;
+
+    for line in String::from_utf8_lossy(&out.stdout).lines() {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+
+        if parts.len() < 2 {
+            continue;
+        }
+
+        if let Ok(value) = parts[0].parse::<i32>() {
+            insertions += value;
+        }
+
+        if let Ok(value) = parts[1].parse::<i32>() {
+            deletions += value;
+        }
+    }
+
+    Ok((insertions, deletions))
+}
+
+#[tauri::command]
+fn git_branch_relationship_preview(
+    repo_path: String,
+    left_branch: String,
+    right_branch: String,
+) -> Result<BranchRelationshipPreview, String> {
+    let left_branch = left_branch.trim().to_string();
+    let right_branch = right_branch.trim().to_string();
+
+    if left_branch.is_empty() || right_branch.is_empty() {
+        return Err("Branch relationship preview requires two branch names.".into());
+    }
+
+    if left_branch == right_branch {
+        return Err("Branch relationship preview requires two different branches.".into());
+    }
+
+    let left_head = rev_parse_commit(&repo_path, &left_branch)?;
+    let right_head = rev_parse_commit(&repo_path, &right_branch)?;
+    let merge_base = merge_base(&repo_path, &left_branch, &right_branch)?;
+
+    let left_range = format!("{}..{}", right_branch, left_branch);
+    let right_range = format!("{}..{}", left_branch, right_branch);
+
+    let left_only_commits = preview_commits(&repo_path, &left_range)?;
+    let right_only_commits = preview_commits(&repo_path, &right_range)?;
+
+    let left_only_changed = preview_changed_files_from_commits(&repo_path, &left_range)?;
+    let right_only_changed = preview_changed_files_from_commits(&repo_path, &right_range)?;
+
+    let left_paths: std::collections::BTreeSet<String> =
+        left_only_changed.iter().map(|file| file.path.clone()).collect();
+
+    let right_paths: std::collections::BTreeSet<String> =
+        right_only_changed.iter().map(|file| file.path.clone()).collect();
+
+    let shared_touched_files: Vec<String> =
+        left_paths.intersection(&right_paths).cloned().collect();
+
+    let (insertions, deletions) = diff_numstat(&repo_path, &left_branch, &right_branch)?;
+    let working_changes = count_working_changes(&repo_path)?;
+
+    let left_ahead = left_only_commits.len();
+    let right_ahead = right_only_commits.len();
+
+    let can_fast_forward_left = left_ahead == 0 && right_ahead > 0;
+    let can_fast_forward_right = right_ahead == 0 && left_ahead > 0;
+
+    let (classification, risk_level) = if left_ahead == 0 && right_ahead == 0 {
+        ("IDENTICAL", "LOW")
+    } else if can_fast_forward_left {
+        ("FAST_FORWARD_LEFT", if working_changes > 0 { "MEDIUM" } else { "LOW" })
+    } else if can_fast_forward_right {
+        ("FAST_FORWARD_RIGHT", if working_changes > 0 { "MEDIUM" } else { "LOW" })
+    } else if !shared_touched_files.is_empty() && working_changes > 0 {
+        ("HIGH_RISK", "HIGH")
+    } else if !shared_touched_files.is_empty() {
+        ("DIVERGED_SHARED_PATHS", "MEDIUM")
+    } else {
+        ("DIVERGED_CLEAN_PATHS", if working_changes > 0 { "MEDIUM" } else { "LOW" })
+    };
+
+    let summary = match classification {
+        "IDENTICAL" => "Both branches point at equivalent visible history for this comparison.".to_string(),
+        "FAST_FORWARD_LEFT" => format!("{} can be fast-forwarded to {}.", left_branch, right_branch),
+        "FAST_FORWARD_RIGHT" => format!("{} can be fast-forwarded to {}.", right_branch, left_branch),
+        "DIVERGED_SHARED_PATHS" | "HIGH_RISK" => "Both branches contain unique commits and touch at least one same path. Human review is required before merging.".to_string(),
+        _ => "Both branches contain unique commits, but their changed paths do not visibly overlap in this preview.".to_string(),
+    };
+
+    let warning = if working_changes > 0 {
+        "Working folder has uncommitted changes. Branch operations are harder to reason about until the working folder is clean.".to_string()
+    } else if !shared_touched_files.is_empty() {
+        "Shared touched paths detected. This does not guarantee a conflict, but it requires review before merge execution.".to_string()
+    } else {
+        "Preview only. No branch was switched, merged, rebased, or modified.".to_string()
+    };
+
+    Ok(BranchRelationshipPreview {
+        repo_path,
+        left_branch,
+        right_branch,
+        left_head,
+        right_head,
+        merge_base,
+        left_only_commits,
+        right_only_commits,
+        left_only_files: left_paths.into_iter().collect(),
+        right_only_files: right_paths.into_iter().collect(),
+        shared_touched_files,
+        insertions,
+        deletions,
+        left_ahead,
+        right_ahead,
+        can_fast_forward_left,
+        can_fast_forward_right,
+        classification: classification.to_string(),
+        risk_level: risk_level.to_string(),
+        working_changes,
+        summary,
         warning,
     })
 }
@@ -3421,6 +3619,7 @@ pub fn run() {
             git_remote_status,
             git_branch_overview,
             git_branch_graph,
+            git_branch_relationship_preview,
             git_create_branch,
             git_switch_branch,
             git_operation_state,
