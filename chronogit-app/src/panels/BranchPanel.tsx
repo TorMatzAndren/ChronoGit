@@ -1,5 +1,6 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { buildBranchTopology } from "../core/branchTopology";
+import { ChronoDropdown } from "../components/ChronoDropdown";
 import { inspectBranchRelationship } from "../core/gitActions";
 import type { BranchGraph, BranchInfo, BranchOverview, BranchRelationshipPreview } from "../core/chronogitRuntimeTypes";
 
@@ -252,6 +253,13 @@ export function BranchPanel({
         .filter((branch) => !branch.is_detached)
     : [];
 
+  const branchDropdownOptions = inspectableBranches.map((branch) => ({
+    value: branch.name,
+    title: branch.name,
+    subtitle: `${branch.is_remote ? "remote" : "local"} · ${branch.full_name}`,
+    badge: branchTrackingLabel(branch),
+  }));
+
   async function requestCreateBranch() {
     const name = branchName.trim();
     if (!name) return;
@@ -359,23 +367,25 @@ export function BranchPanel({
             </span>
           </div>
 
-          <select value={leftBranch} onChange={(event) => setLeftBranch(event.target.value)}>
-            <option value="">Left branch</option>
-            {inspectableBranches.map((branch) => (
-                <option key={`left-${branch.full_name}`} value={branch.name}>
-                  {branch.name}
-                </option>
-            ))}
-          </select>
+          <ChronoDropdown
+            value={leftBranch}
+            options={branchDropdownOptions}
+            placeholder="Left branch"
+            searchPlaceholder="Search left branch..."
+            emptyText="No branches match this search."
+            onChange={setLeftBranch}
+            className="branch-ref-dropdown"
+          />
 
-          <select value={rightBranch} onChange={(event) => setRightBranch(event.target.value)}>
-            <option value="">Right branch</option>
-            {inspectableBranches.map((branch) => (
-                <option key={`right-${branch.full_name}`} value={branch.name}>
-                  {branch.name}
-                </option>
-            ))}
-          </select>
+          <ChronoDropdown
+            value={rightBranch}
+            options={branchDropdownOptions}
+            placeholder="Right branch"
+            searchPlaceholder="Search right branch..."
+            emptyText="No branches match this search."
+            onChange={setRightBranch}
+            className="branch-ref-dropdown"
+          />
 
           <button
             disabled={!leftBranch || !rightBranch || leftBranch === rightBranch || relationshipBusy}

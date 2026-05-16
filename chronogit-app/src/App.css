@@ -3405,3 +3405,25 @@ code {
   display: none;
 }
 
+
+
+.cg-unified-dropdown__label {
+  display: block;
+  margin-bottom: 4px;
+  color: #9fb0bc;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* CHRONOGIT_BRANCH_DROPDOWN_OVERFLOW_FIX_V1 */
+.branch-subpanel:has(.branch-ref-dropdown),
+.branch-subpanel:has(.cg-unified-dropdown__menu),
+.branch-subpanel__body:has(.branch-ref-dropdown),
+.branch-relationship-box:has(.branch-ref-dropdown) {
+  overflow: visible;
+}
+
+.branch-ref-dropdown .cg-unified-dropdown__menu {
+  z-index: 7000;
+}
