@@ -3844,3 +3844,53 @@ code {
   color: #ffd27a !important;
   font-weight: 700;
 }
+
+/* CHRONOGIT_MERGE_ACTION_RECOMMENDATIONS_V1 */
+.merge-action-recommendations {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 210, 122, 0.34);
+  border-radius: 10px;
+  background: rgba(255, 210, 122, 0.075);
+}
+
+.merge-action-recommendations > strong {
+  color: #ffe1a0;
+  font-size: 0.78rem;
+}
+
+.merge-action-recommendations ol {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
+}
+
+.merge-action-recommendations li {
+  color: #c9d4df;
+  font-size: 0.72rem;
+  line-height: 1.38;
+}
+
+.merge-action-recommendations li b {
+  color: #ffffff;
+}
+
+/* CHRONOGIT_MERGE_RECOMMENDATION_NAVIGATION_V1 */
+.merge-action-recommendations li {
+  display: grid;
+  gap: 5px;
+}
+
+.merge-action-recommendations li button {
+  justify-self: start;
+  padding: 5px 8px;
+  font-size: 0.68rem;
+}
+
+.merge-action-recommendations li button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}

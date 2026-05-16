@@ -606,6 +606,19 @@ ${context.rawTruth.slice(0, 12000)}`;
     updateActiveTab((tab) => ({ ...tab, panels: [...tab.panels, makePanel(type, tab.panels.length)] }));
   }
 
+  function openOrAddPanel(type: PanelType) {
+    updateActiveTab((tab) => {
+      if (tab.panels.some((panel) => panel.type === type)) {
+        return tab;
+      }
+
+      return {
+        ...tab,
+        panels: [...tab.panels, makePanel(type, tab.panels.length)],
+      };
+    });
+  }
+
   function closePanel(panelId: string) {
     updateActiveTab((tab) => ({
       ...tab,
@@ -929,6 +942,7 @@ ${context.rawTruth.slice(0, 12000)}`;
           loadBranchOverview={() => Promise.all([loadBranchOverview(), loadBranchGraph()]).then(() => undefined)}
           createBranch={createBranch}
           requestSwitchBranch={requestSwitchBranch}
+          openOrAddPanel={openOrAddPanel}
           ui={ui}
         />
       );

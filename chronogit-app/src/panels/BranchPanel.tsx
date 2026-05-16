@@ -4,6 +4,7 @@ import { ChronoDropdown } from "../components/ChronoDropdown";
 import { HelpHint } from "../components/HelpHint";
 import { executeBranchMerge, inspectBranchRelationship, previewBranchMerge } from "../core/gitActions";
 import type { BranchGraph, BranchInfo, BranchMergePreview, BranchOverview, BranchRelationshipPreview } from "../core/chronogitRuntimeTypes";
+import type { PanelType } from "../core/chronogitWorkspaceTypes";
 
 type Props = {
   beginnerMode: boolean;
@@ -13,6 +14,7 @@ type Props = {
   loadBranchOverview: () => Promise<void>;
   createBranch: (branchName: string) => Promise<void>;
   requestSwitchBranch: (branch: BranchInfo) => void;
+  openOrAddPanel: (type: PanelType) => void;
   ui: (beginnerMode: boolean, beginner: string, pro: string) => string;
 };
 
@@ -413,6 +415,7 @@ export function BranchPanel({
   loadBranchOverview,
   createBranch,
   requestSwitchBranch,
+  openOrAddPanel,
   ui,
 }: Props) {
   const [branchName, setBranchName] = useState("");
@@ -844,9 +847,44 @@ export function BranchPanel({
               <span>{mergeReadinessExplanation(mergePreview)}</span>
 
               {!mergePreview.allowed && mergeBlockedByLocalWork(mergePreview) ? (
-                <span className="merge-readiness-note">
-                  The selected merge itself may be safe, but ChronoGit will not mix it with unfinished local file edits.
-                </span>
+                <section className="merge-action-recommendations">
+                  <strong>Recommended next steps</strong>
+
+                  <ol>
+                    <li>
+                      <b>Review current local changes.</b>
+                      Make sure you know which files are modified before merging.
+                      <button type="button" onClick={() => openOrAddPanel("change-lists")}>
+                        Open Change Lists
+                      </button>
+                    </li>
+                    <li>
+                      <b>Commit the work you want to keep.</b>
+                      This safely stores your current edits in Git before the merge.
+                      <button type="button" onClick={() => openOrAddPanel("commit-preflight")}>
+                        Open Commit Preflight
+                      </button>
+                    </li>
+                    <li>
+                      <b>Discard only changes you truly do not want.</b>
+                      Discarding local edits can permanently remove work.
+                      <button type="button" onClick={() => openOrAddPanel("change-lists")}>
+                        Open Change Lists
+                      </button>
+                    </li>
+                    <li>
+                      <b>Stash support is not implemented here yet.</b>
+                      ChronoGit is not pretending that option exists in this panel until it does.
+                      <button type="button" disabled>
+                        Stash unavailable
+                      </button>
+                    </li>
+                  </ol>
+
+                  <span className="merge-readiness-note">
+                    The selected merge itself may be safe, but ChronoGit will not mix it with unfinished local file edits.
+                  </span>
+                </section>
               ) : null}
             </section>
 
