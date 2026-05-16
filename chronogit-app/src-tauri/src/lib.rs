@@ -107,6 +107,30 @@ struct BranchRelationshipPreview {
     warning: String,
 }
 
+
+#[derive(Serialize)]
+struct BranchMergePreview {
+    repo_path: String,
+    current_branch: String,
+    target_branch: String,
+    mode: String,
+    risk_level: String,
+    allowed: bool,
+    required_confirmation: String,
+    blockers: Vec<String>,
+    consequence: String,
+    warning: String,
+    relationship: BranchRelationshipPreview,
+}
+
+#[derive(Serialize)]
+struct BranchMergeResult {
+    ok: bool,
+    message: String,
+    stdout: String,
+    stderr: String,
+}
+
 #[derive(Serialize)]
 struct GitOperationState {
     rebase_in_progress: bool,
@@ -1475,6 +1499,171 @@ fn git_branch_relationship_preview(
         warning,
     })
 }
+
+
+#[tauri::command]
+fn git_merge_branch_preview(
+    repo_path: String,
+    target_branch: String,
+) -> Result<BranchMergePreview, String> {
+    let current = current_branch(&repo_path)?;
+    let target_branch = target_branch.trim().to_string();
+
+    if target_branch.is_empty() {
+        return Err("Merge preview requires a target branch.".into());
+    }
+
+    if target_branch == current {
+        return Err("Merge preview requires a different branch than the current branch.".into());
+    }
+
+    let relationship =
+        git_branch_relationship_preview(repo_path.clone(), current.clone(), target_branch.clone())?;
+
+    let operation_state = git_operation_state(repo_path.clone())?;
+
+    let mut blockers = Vec::new();
+
+    if operation_state.merge_in_progress
+        || operation_state.rebase_in_progress
+        || operation_state.cherry_pick_in_progress
+        || operation_state.revert_in_progress
+        || !operation_state.conflicted_files.is_empty()
+    {
+        blockers.push("Another Git operation is already in progress. Resolve or abort it before merging.".to_string());
+    }
+
+    if relationship.working_changes > 0 {
+        blockers.push("Working tree has uncommitted changes. Commit, restore, or stash them before merging.".to_string());
+    }
+
+    let mode = if relationship.left_ahead == 0 && relationship.right_ahead == 0 {
+        "ALREADY_UP_TO_DATE"
+    } else if relationship.can_fast_forward_left {
+        "FAST_FORWARD"
+    } else if !relationship.shared_touched_files.is_empty() {
+        "RISKY_MERGE"
+    } else {
+        "NORMAL_MERGE"
+    };
+
+    let risk_level = if !blockers.is_empty() {
+        "HIGH"
+    } else if mode == "RISKY_MERGE" {
+        "HIGH"
+    } else if mode == "NORMAL_MERGE" {
+        "MEDIUM"
+    } else {
+        "LOW"
+    };
+
+    let required_confirmation = if risk_level == "HIGH" {
+        "override"
+    } else {
+        "merge"
+    };
+
+    let consequence = match mode {
+        "ALREADY_UP_TO_DATE" => format!(
+            "{} already contains the visible history from {}. Nothing needs to merge.",
+            current, target_branch
+        ),
+        "FAST_FORWARD" => format!(
+            "{} can move forward to {} without creating a merge commit.",
+            current, target_branch
+        ),
+        "NORMAL_MERGE" => format!(
+            "{} and {} both contain unique commits. Git will create a merge commit if the merge succeeds.",
+            current, target_branch
+        ),
+        "RISKY_MERGE" => format!(
+            "{} and {} both changed at least one same file. Git may report conflicts.",
+            current, target_branch
+        ),
+        _ => "Unknown merge mode.".to_string(),
+    };
+
+    let warning = if !blockers.is_empty() {
+        blockers.join(" ")
+    } else if mode == "RISKY_MERGE" {
+        "Shared touched files detected. This merge may require conflict resolution.".to_string()
+    } else if mode == "NORMAL_MERGE" {
+        "This is not a fast-forward. Git may create a merge commit.".to_string()
+    } else {
+        "Preview only. No merge has been executed yet.".to_string()
+    };
+
+    let allowed = blockers.is_empty() && mode != "ALREADY_UP_TO_DATE";
+
+    Ok(BranchMergePreview {
+        repo_path,
+        current_branch: current,
+        target_branch,
+        mode: mode.to_string(),
+        risk_level: risk_level.to_string(),
+        allowed,
+        required_confirmation: required_confirmation.to_string(),
+        blockers,
+        consequence,
+        warning,
+        relationship,
+    })
+}
+
+#[tauri::command]
+fn git_merge_branch_execute(
+    repo_path: String,
+    target_branch: String,
+    confirmation: String,
+) -> Result<BranchMergeResult, String> {
+    let preview = git_merge_branch_preview(repo_path.clone(), target_branch.clone())?;
+
+    if !preview.allowed {
+        return Err(format!("Merge blocked: {}", preview.warning));
+    }
+
+    if confirmation.trim() != preview.required_confirmation {
+        return Err(format!(
+            "Merge blocked: type '{}' to confirm this merge.",
+            preview.required_confirmation
+        ));
+    }
+
+    let mut command = Command::new("git");
+    command.arg("-C").arg(&repo_path).arg("merge");
+
+    if preview.mode == "FAST_FORWARD" {
+        command.arg("--ff-only");
+    } else {
+        command.arg("--no-edit");
+    }
+
+    command.arg(&target_branch);
+
+    let out = command.output().map_err(|e| e.to_string())?;
+
+    let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+
+    if out.status.success() {
+        Ok(BranchMergeResult {
+            ok: true,
+            message: format!(
+                "Merged {} into {} using mode {}.",
+                preview.target_branch, preview.current_branch, preview.mode
+            ),
+            stdout,
+            stderr,
+        })
+    } else {
+        Err(format!(
+            "Merge failed.\n\nstdout:\n{}\n\nstderr:\n{}\n\nIf Git started a merge, resolve conflicts or abort the merge before trying another operation.",
+            stdout,
+            stderr
+        ))
+    }
+}
+
 
 fn fetch_configured_remote(repo_path: &str) -> Result<String, String> {
     let upstream = current_upstream(repo_path)?;
@@ -3620,6 +3809,8 @@ pub fn run() {
             git_branch_overview,
             git_branch_graph,
             git_branch_relationship_preview,
+            git_merge_branch_preview,
+            git_merge_branch_execute,
             git_create_branch,
             git_switch_branch,
             git_operation_state,

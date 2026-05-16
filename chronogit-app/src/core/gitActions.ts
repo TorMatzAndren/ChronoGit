@@ -3,6 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   CommitPreflight,
   CommitResult,
+  BranchMergePreview,
+  BranchMergeResult,
   BranchRelationshipPreview,
   GitRemoteStatus,
   GitStatusResponse,
@@ -23,6 +25,35 @@ export async function inspectBranchRelationship(
       repoPath,
       leftBranch,
       rightBranch,
+    },
+  );
+}
+
+
+export async function previewBranchMerge(
+  repoPath: string,
+  targetBranch: string,
+): Promise<BranchMergePreview> {
+  return invoke<BranchMergePreview>(
+    "git_merge_branch_preview",
+    {
+      repoPath,
+      targetBranch,
+    },
+  );
+}
+
+export async function executeBranchMerge(
+  repoPath: string,
+  targetBranch: string,
+  confirmation: string,
+): Promise<BranchMergeResult> {
+  return invoke<BranchMergeResult>(
+    "git_merge_branch_execute",
+    {
+      repoPath,
+      targetBranch,
+      confirmation,
     },
   );
 }

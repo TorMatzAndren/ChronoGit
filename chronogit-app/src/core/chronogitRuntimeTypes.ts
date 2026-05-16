@@ -258,6 +258,28 @@ export type BranchGraph = {
 };
 
 
+
+export type BranchMergePreview = {
+  repo_path: string;
+  current_branch: string;
+  target_branch: string;
+  mode: string;
+  risk_level: string;
+  allowed: boolean;
+  required_confirmation: string;
+  blockers: string[];
+  consequence: string;
+  warning: string;
+  relationship: BranchRelationshipPreview;
+};
+
+export type BranchMergeResult = {
+  ok: boolean;
+  message: string;
+  stdout: string;
+  stderr: string;
+};
+
 export type BranchRelationshipPreview = {
   repo_path: string;
   left_branch: string;
