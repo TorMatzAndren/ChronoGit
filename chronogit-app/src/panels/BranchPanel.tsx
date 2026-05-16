@@ -2,8 +2,8 @@ import { useMemo, useState, type ReactNode } from "react";
 import { buildBranchTopology } from "../core/branchTopology";
 import { ChronoDropdown } from "../components/ChronoDropdown";
 import { HelpHint } from "../components/HelpHint";
-import { inspectBranchRelationship } from "../core/gitActions";
-import type { BranchGraph, BranchInfo, BranchOverview, BranchRelationshipPreview } from "../core/chronogitRuntimeTypes";
+import { executeBranchMerge, inspectBranchRelationship, previewBranchMerge } from "../core/gitActions";
+import type { BranchGraph, BranchInfo, BranchMergePreview, BranchOverview, BranchRelationshipPreview } from "../core/chronogitRuntimeTypes";
 
 type Props = {
   beginnerMode: boolean;
@@ -334,6 +334,77 @@ function RelationshipEvidenceGroup({
   );
 }
 
+
+function describeMergeIntent(preview: BranchMergePreview): {
+  title: string;
+  explanation: string;
+  safety: string;
+} {
+  if (preview.mode === "FAST_FORWARD") {
+    return {
+      title: "Bring newer changes into the current timeline",
+      explanation: "Git can safely move the current timeline forward without creating an extra merge commit.",
+      safety: "This is usually the safest and simplest merge type.",
+    };
+  }
+
+  if (preview.mode === "NORMAL_MERGE") {
+    return {
+      title: "Combine two separate lines of work",
+      explanation: "Both branches contain unique commits. Git will combine them into one shared timeline.",
+      safety: "Git will probably create a merge commit to record the combination.",
+    };
+  }
+
+  if (preview.mode === "RISKY_MERGE") {
+    return {
+      title: "Combine timelines with overlapping file changes",
+      explanation: "Both branches changed some of the same files. Git may ask you to resolve conflicts manually.",
+      safety: "Review carefully before continuing.",
+    };
+  }
+
+  return {
+    title: "Current timeline already contains these changes",
+    explanation: "Nothing new needs to be merged from the selected branch.",
+    safety: "No merge operation is required.",
+  };
+}
+
+
+function mergeTopologyRisk(preview: BranchMergePreview) {
+  if (preview.mode === "FAST_FORWARD") return "LOW";
+  if (preview.mode === "NORMAL_MERGE") return "MEDIUM";
+  if (preview.mode === "RISKY_MERGE") return "HIGH";
+  return preview.risk_level;
+}
+
+function mergeBlockedByLocalWork(preview: BranchMergePreview) {
+  return preview.blockers.some((blocker) =>
+    blocker.toLowerCase().includes("working tree")
+  );
+}
+
+function mergeReadinessTitle(preview: BranchMergePreview) {
+  if (mergeBlockedByLocalWork(preview)) {
+    return "You still have unsaved local work";
+  }
+
+  if (!preview.allowed) {
+    return "ChronoGit blocked this merge";
+  }
+
+  return "Ready to merge";
+}
+
+function mergeReadinessExplanation(preview: BranchMergePreview) {
+  if (mergeBlockedByLocalWork(preview)) {
+    return "Some files have been changed locally but are not safely stored in Git yet. Commit them, discard them, or set them aside before merging.";
+  }
+
+  return preview.warning;
+}
+
 export function BranchPanel({
   beginnerMode,
   repoPath,
@@ -348,9 +419,15 @@ export function BranchPanel({
   const [creating, setCreating] = useState(false);
   const [leftBranch, setLeftBranch] = useState("");
   const [rightBranch, setRightBranch] = useState("");
+  const [incomingMergeBranch, setIncomingMergeBranch] = useState("");
   const [relationshipBusy, setRelationshipBusy] = useState(false);
   const [relationshipError, setRelationshipError] = useState("");
   const [relationship, setRelationship] = useState<BranchRelationshipPreview | null>(null);
+  const [mergePreviewBusy, setMergePreviewBusy] = useState(false);
+  const [mergeExecuteBusy, setMergeExecuteBusy] = useState(false);
+  const [mergeError, setMergeError] = useState("");
+  const [mergeConfirmation, setMergeConfirmation] = useState("");
+  const [mergePreview, setMergePreview] = useState<BranchMergePreview | null>(null);
 
   const inspectableBranches = branchOverview
     ? [...branchOverview.local_branches, ...branchOverview.remote_branches]
@@ -392,6 +469,43 @@ export function BranchPanel({
       setRelationshipError(String(err));
     } finally {
       setRelationshipBusy(false);
+    }
+  }
+
+
+  async function requestMergePreview() {
+    const target = incomingMergeBranch.trim();
+
+    if (!target) return;
+
+    try {
+      setMergePreviewBusy(true);
+      setMergeError("");
+      setMergeConfirmation("");
+      setMergePreview(await previewBranchMerge(repoPath, target));
+    } catch (err) {
+      setMergePreview(null);
+      setMergeError(String(err));
+    } finally {
+      setMergePreviewBusy(false);
+    }
+  }
+
+  async function requestMergeExecute() {
+    if (!mergePreview) return;
+
+    try {
+      setMergeExecuteBusy(true);
+      setMergeError("");
+      await executeBranchMerge(repoPath, mergePreview.target_branch, mergeConfirmation);
+      setMergePreview(null);
+      setRelationship(null);
+      setMergeConfirmation("");
+      await loadBranchOverview();
+    } catch (err) {
+      setMergeError(String(err));
+    } finally {
+      setMergeExecuteBusy(false);
     }
   }
 
@@ -456,7 +570,7 @@ export function BranchPanel({
       <BranchSubpanel
         title={ui(beginnerMode, "Timeline Relationship Inspector", "Branch relationship preview")}
         subtitle={ui(beginnerMode, "Understand two timelines before merge/rebase/switch decisions.", "merge-base · rev-list · changed path overlap")}
-        defaultOpen={true}
+        defaultOpen={false}
         important
       >
         <section className="branch-relationship-box">
@@ -643,6 +757,127 @@ export function BranchPanel({
             </BranchSubpanel>
           </section>
         ) : null}
+      </BranchSubpanel>
+
+      <BranchSubpanel
+        title={ui(beginnerMode, "Merge into current timeline", "git merge into current branch")}
+        subtitle={ui(
+          beginnerMode,
+          "Choose one incoming branch and preview merging it into the branch you are currently standing on.",
+          "Destination is current HEAD branch. Source is selected incoming branch."
+        )}
+        defaultOpen={true}
+        important
+      >
+        <section className="branch-merge-direction-card">
+          <div>
+            <span className="cg-eyebrow">Merge direction</span>
+            <strong>{branchOverview?.current_branch || "unknown current branch"} ← incoming branch</strong>
+            <p>
+              ChronoGit always merges <strong>into the current active branch</strong>.
+              Pick the branch you want to bring in, then preview before executing anything.
+            </p>
+          </div>
+
+          <ChronoDropdown
+            value={incomingMergeBranch}
+            options={branchDropdownOptions.filter((option) => option.value !== branchOverview?.current_branch)}
+            placeholder="Incoming branch"
+            searchPlaceholder="Search branch to merge in..."
+            emptyText="No mergeable branches match this search."
+            onChange={setIncomingMergeBranch}
+            className="branch-ref-dropdown"
+          />
+
+          <button
+            disabled={!incomingMergeBranch || mergePreviewBusy || mergeExecuteBusy}
+            onClick={() => { void requestMergePreview(); }}
+            title="Preview merging the selected incoming branch into the current active branch."
+          >
+            {mergePreviewBusy ? "Previewing..." : ui(beginnerMode, "Preview merge", "git merge preview")}
+          </button>
+        </section>
+
+        {mergeError ? (
+          <section className="branch-callout branch-callout--warning">
+            <strong>Merge preview / execution failed</strong>
+            <span>{mergeError}</span>
+          </section>
+        ) : null}
+
+        {mergePreview ? (
+          <section className={`branch-merge-preview branch-merge-preview--${mergePreview.risk_level.toLowerCase()}`}>
+            {(() => {
+              const intent = describeMergeIntent(mergePreview);
+
+              return (
+                <div className="relationship-verdict-card">
+                  <div>
+                    <span className="cg-eyebrow">What you are about to do</span>
+
+                    <h3>{intent.title}</h3>
+
+                    <p>
+                      Bring changes from{" "}
+                      <strong>{mergePreview.target_branch}</strong>
+                      {" "}into your current timeline{" "}
+                      <strong>{mergePreview.current_branch}</strong>.
+                    </p>
+
+                    <p>{intent.explanation}</p>
+
+                    <p className="merge-human-summary">
+                      {intent.safety}
+                    </p>
+                  </div>
+
+                  <em className={`relationship-risk relationship-risk--${mergeTopologyRisk(mergePreview).toLowerCase()}`}>
+                    merge: {mergeTopologyRisk(mergePreview)} risk
+                  </em>
+                </div>
+              );
+            })()}
+
+            <section className={mergePreview.allowed ? "relationship-interpretation" : "relationship-interpretation relationship-interpretation--warning"}>
+              <strong>{mergeReadinessTitle(mergePreview)}</strong>
+
+              <span>{mergeReadinessExplanation(mergePreview)}</span>
+
+              {!mergePreview.allowed && mergeBlockedByLocalWork(mergePreview) ? (
+                <span className="merge-readiness-note">
+                  The selected merge itself may be safe, but ChronoGit will not mix it with unfinished local file edits.
+                </span>
+              ) : null}
+            </section>
+
+            {mergePreview.blockers.length ? (
+              <div className="relationship-evidence relationship-evidence--important">
+                {mergePreview.blockers.map((blocker) => <code key={blocker}>{blocker}</code>)}
+              </div>
+            ) : null}
+
+            {mergePreview.allowed ? (
+              <section className="branch-merge-confirm">
+                <label>
+                  Type <strong>{mergePreview.required_confirmation}</strong> to merge
+                  <input
+                    value={mergeConfirmation}
+                    onChange={(event) => setMergeConfirmation(event.target.value)}
+                    placeholder={mergePreview.required_confirmation}
+                  />
+                </label>
+                <button
+                  className={mergePreview.risk_level === "HIGH" ? "danger-button" : "confirm"}
+                  disabled={mergeConfirmation.trim() !== mergePreview.required_confirmation || mergeExecuteBusy}
+                  onClick={() => { void requestMergeExecute(); }}
+                >
+                  {mergeExecuteBusy ? "Merging..." : ui(beginnerMode, "Execute merge", "git merge")}
+                </button>
+              </section>
+            ) : null}
+          </section>
+        ) : null}
+
       </BranchSubpanel>
 
       {branchOverview ? (
