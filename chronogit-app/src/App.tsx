@@ -682,7 +682,7 @@ ${context.rawTruth.slice(0, 12000)}`;
     window.addEventListener("pointerup", onUp);
   }
 
-  async function executeFileAction(action: "git_stage" | "git_unstage" | "git_restore" | "git_remove_untracked" | "git_ignore_path", path: string) {
+  async function executeFileAction(action: "git_stage" | "git_unstage" | "git_unstage_prefix" | "git_restore" | "git_remove_untracked" | "git_ignore_path", path: string) {
     try {
       setBusyPath(path);
       setMessage("");
@@ -704,7 +704,7 @@ ${context.rawTruth.slice(0, 12000)}`;
     }
   }
 
-  async function runFileAction(action: "git_stage" | "git_unstage" | "git_restore" | "git_remove_untracked" | "git_ignore_path", path: string) {
+  async function runFileAction(action: "git_stage" | "git_unstage" | "git_unstage_prefix" | "git_restore" | "git_remove_untracked" | "git_ignore_path", path: string) {
     if (action === "git_restore" || action === "git_remove_untracked") {
       setConfirmAction({
         title: action === "git_restore" ? "Restore / discard local change" : "Remove untracked file",

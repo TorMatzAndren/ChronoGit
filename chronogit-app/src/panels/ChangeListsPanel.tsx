@@ -4,6 +4,7 @@ import type { ExplainContext, FileChange } from "../core/chronogitRuntimeTypes";
 type FileAction =
   | "git_stage"
   | "git_unstage"
+  | "git_unstage_prefix"
   | "git_restore"
   | "git_remove_untracked"
   | "git_ignore_path";
@@ -50,6 +51,37 @@ function group(changes: FileChange[]) {
   }
   return grouped;
 }
+
+
+function topFolder(path: string) {
+  const cleaned = path.replace(/^"+|"+$/g, "");
+  const parts = cleaned.split("/").filter(Boolean);
+
+  if (parts.length <= 1) {
+    return "";
+  }
+
+  return `${parts[0]}/`;
+}
+
+function stagedFolderGroups(staged: FileChange[]) {
+  const grouped = new Map<string, FileChange[]>();
+
+  for (const change of staged) {
+    const folder = topFolder(change.path);
+
+    if (!folder) continue;
+
+    const current = grouped.get(folder) || [];
+    current.push(change);
+    grouped.set(folder, current);
+  }
+
+  return Array.from(grouped.entries())
+    .filter(([, rows]) => rows.length >= 5)
+    .sort((a, b) => b[1].length - a[1].length);
+}
+
 
 function ChangeCard({
   beginnerMode,
@@ -150,6 +182,7 @@ export function ChangeListsPanel({
   ui,
 }: Props) {
   const [expandedPath, setExpandedPath] = useState("");
+  const folderGroups = stagedFolderGroups(staged);
 
   function renderGroupedChanges(items: FileChange[]) {
     const grouped = group(items);
@@ -188,6 +221,31 @@ export function ChangeListsPanel({
     <div className="cg-panel-content cg-change-lists">
       <div>
         <h3>{ui(beginnerMode, "Prepared for next commit", "index / staged")}</h3>
+
+        {folderGroups.length ? (
+          <section className="bulk-change-actions">
+            <strong>Large prepared folders</strong>
+            <span>
+              These folders contain many prepared files. You can remove a whole folder from the next commit without deleting the files.
+            </span>
+
+            {folderGroups.map(([folder, rows]) => (
+              <article key={folder}>
+                <div>
+                  <b>{folder}</b>
+                  <span>{rows.length} prepared files</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => runFileAction("git_unstage_prefix", folder)}
+                >
+                  Remove folder from next commit
+                </button>
+              </article>
+            ))}
+          </section>
+        ) : null}
+
         {staged.length ? renderGroupedChanges(staged) : <p>Nothing prepared.</p>}
       </div>
       <div>

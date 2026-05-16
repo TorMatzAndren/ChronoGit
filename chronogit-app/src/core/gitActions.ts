@@ -63,6 +63,7 @@ export async function executeFileAction(
   action:
     | "git_stage"
     | "git_unstage"
+    | "git_unstage_prefix"
     | "git_restore"
     | "git_remove_untracked"
     | "git_ignore_path",

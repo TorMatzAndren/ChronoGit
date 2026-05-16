@@ -3894,3 +3894,62 @@ code {
   cursor: not-allowed;
   opacity: 0.48;
 }
+
+/* CHRONOGIT_BULK_STAGED_FOLDER_ACTIONS_V1 */
+.bulk-change-actions {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 10px;
+  padding: 10px;
+  border: 1px solid rgba(255, 210, 122, 0.38);
+  border-radius: 11px;
+  background: rgba(255, 210, 122, 0.07);
+}
+
+.bulk-change-actions > strong {
+  color: #ffe1a0;
+  font-size: 0.82rem;
+}
+
+.bulk-change-actions > span {
+  color: #c9d4df;
+  font-size: 0.72rem;
+}
+
+.bulk-change-actions article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px;
+  border-radius: 9px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.bulk-change-actions article div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.bulk-change-actions article b {
+  color: #ffffff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bulk-change-actions article span {
+  color: #9fb0bf;
+  font-size: 0.7rem;
+}
+
+.bulk-change-actions article button {
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .bulk-change-actions article {
+    grid-template-columns: 1fr;
+  }
+}

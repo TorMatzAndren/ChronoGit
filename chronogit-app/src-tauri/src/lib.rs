@@ -1860,10 +1860,30 @@ fn git_pull_preview(repo_path: String) -> Result<RemoteOperationPreview, String>
 
 #[tauri::command]
 fn git_status(repo_path: String) -> Result<GitStatusResponse, String> {
-    let out = Command::new("git")
+    let branch_out = Command::new("git")
         .arg("-C")
         .arg(&repo_path)
         .args(["status", "--porcelain=v1", "--branch"])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !branch_out.status.success() {
+        return Err(String::from_utf8_lossy(&branch_out.stderr).trim().to_string());
+    }
+
+    let mut branch = "unknown".to_string();
+
+    for line in String::from_utf8_lossy(&branch_out.stdout).lines() {
+        if line.starts_with("## ") {
+            branch = line.replace("## ", "");
+            break;
+        }
+    }
+
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .args(["status", "--porcelain=v1", "-z"])
         .output()
         .map_err(|e| e.to_string())?;
 
@@ -1871,37 +1891,33 @@ fn git_status(repo_path: String) -> Result<GitStatusResponse, String> {
         return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
     }
 
-    let text = String::from_utf8_lossy(&out.stdout);
-    let mut branch = "unknown".to_string();
     let mut staged = Vec::new();
     let mut working = Vec::new();
 
-    for line in text.lines() {
-        if line.starts_with("## ") {
-            branch = line.replace("## ", "");
+    for raw in out.stdout.split(|byte| *byte == 0) {
+        if raw.len() < 4 {
             continue;
         }
 
-        if line.len() < 4 {
+        let index_status = raw[0] as char;
+        let worktree_status = raw[1] as char;
+        let path = String::from_utf8_lossy(&raw[3..]).to_string();
+
+        if path.trim().is_empty() {
             continue;
         }
-
-        let chars: Vec<char> = line.chars().collect();
-        let index_status = chars[0];
-        let worktree_status = chars[1];
-        let path = &line[3..];
 
         if index_status == '?' && worktree_status == '?' {
-            working.push(classify_change(index_status, worktree_status, path, false));
+            working.push(classify_change(index_status, worktree_status, &path, false));
             continue;
         }
 
         if index_status != ' ' {
-            staged.push(classify_change(index_status, worktree_status, path, true));
+            staged.push(classify_change(index_status, worktree_status, &path, true));
         }
 
         if worktree_status != ' ' {
-            working.push(classify_change(index_status, worktree_status, path, false));
+            working.push(classify_change(index_status, worktree_status, &path, false));
         }
     }
 
@@ -2065,12 +2081,74 @@ fn git_stage(repo_path: String, path: String) -> Result<String, String> {
 
 #[tauri::command]
 fn git_unstage(repo_path: String, path: String) -> Result<String, String> {
-    run_git_path_action(
-        repo_path,
-        vec!["restore", "--staged"],
-        path,
-        "Removed from next commit",
-    )
+    validate_relative_path(&path)?;
+
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .args(["reset", "HEAD", "--"])
+        .arg(&path)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if out.status.success() {
+        Ok(format!("Removed from next commit {}", path))
+    } else {
+        Err(command_error("git reset HEAD -- <path>", &out))
+    }
+}
+
+#[tauri::command]
+fn git_unstage_prefix(repo_path: String, path: String) -> Result<String, String> {
+    validate_relative_path(&path)?;
+
+    let normalized = path.trim().trim_end_matches('/').to_string();
+
+    if normalized.is_empty() {
+        return Err("Folder/prefix is empty.".into());
+    }
+
+    let status_out = Command::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .args(["status", "--porcelain=v1", "--"])
+        .arg(&normalized)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !status_out.status.success() {
+        return Err(command_error("git status --porcelain=v1 -- <prefix>", &status_out));
+    }
+
+    let staged_count = String::from_utf8_lossy(&status_out.stdout)
+        .lines()
+        .filter(|line| {
+            let mut chars = line.chars();
+            let index_status = chars.next().unwrap_or(' ');
+            index_status != ' ' && index_status != '?'
+        })
+        .count();
+
+    if staged_count == 0 {
+        return Err(format!("No prepared files found under {}", normalized));
+    }
+
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .args(["reset", "HEAD", "--"])
+        .arg(&normalized)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if out.status.success() {
+        Ok(format!(
+            "Removed {} prepared file(s) from next commit under {}",
+            staged_count, normalized
+        ))
+    } else {
+        Err(command_error("git reset HEAD -- <prefix>", &out))
+    }
 }
 
 #[tauri::command]
@@ -3824,6 +3902,7 @@ pub fn run() {
             git_commit_preflight,
             git_stage,
             git_unstage,
+            git_unstage_prefix,
             git_restore,
             git_remove_untracked,
             git_ignore_path,
