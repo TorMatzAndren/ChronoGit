@@ -3427,3 +3427,168 @@ code {
 .branch-ref-dropdown .cg-unified-dropdown__menu {
   z-index: 7000;
 }
+
+/* CHRONOGIT_BRANCH_RELATIONSHIP_SEMANTIC_RESULT_V2 */
+.relationship-verdict-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: start;
+  padding: 13px 14px;
+  border: 1px solid rgba(100, 240, 200, 0.34);
+  border-radius: 13px;
+  background:
+    radial-gradient(circle at top left, rgba(100, 240, 200, 0.13), transparent 22rem),
+    linear-gradient(180deg, rgba(9, 39, 40, 0.86), rgba(4, 16, 18, 0.92));
+}
+
+.relationship-verdict-card h3 {
+  margin: 0;
+  color: #ffffff;
+  font-size: 1.22rem;
+  letter-spacing: -0.02em;
+}
+
+.relationship-verdict-card p {
+  margin-top: 5px;
+  color: #b7c6d3;
+  font-size: 0.78rem;
+}
+
+.relationship-risk {
+  padding: 6px 9px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-style: normal;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border: 1px solid rgba(100, 240, 200, 0.35);
+}
+
+.relationship-risk--low {
+  color: #64f0c8;
+  border-color: rgba(100, 240, 200, 0.62);
+  background: rgba(100, 240, 200, 0.10);
+}
+
+.relationship-risk--medium {
+  color: #ffc56f;
+  border-color: rgba(255, 197, 111, 0.62);
+  background: rgba(255, 197, 111, 0.10);
+}
+
+.relationship-risk--high {
+  color: #ff8b8b;
+  border-color: rgba(255, 139, 139, 0.70);
+  background: rgba(255, 80, 80, 0.12);
+}
+
+.relationship-flow-strip {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+}
+
+.relationship-flow-strip div,
+.relationship-flow-strip b {
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid rgba(100, 240, 200, 0.18);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.relationship-flow-strip div {
+  display: grid;
+  gap: 3px;
+}
+
+.relationship-flow-strip strong {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: #eafff8;
+  font-size: 0.78rem;
+}
+
+.relationship-flow-strip span,
+.relationship-flow-strip b {
+  color: #9facbc;
+  font-size: 0.7rem;
+}
+
+.relationship-flow-strip b {
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.relationship-metric--warning {
+  border-color: rgba(255, 197, 111, 0.55) !important;
+  background: rgba(255, 197, 111, 0.08) !important;
+}
+
+.relationship-interpretation {
+  display: grid;
+  gap: 5px;
+  padding: 10px 12px;
+  border: 1px solid rgba(100, 240, 200, 0.22);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.relationship-interpretation--warning {
+  border-color: rgba(255, 197, 111, 0.50);
+  background: rgba(255, 197, 111, 0.08);
+}
+
+.relationship-interpretation strong {
+  color: #ffffff;
+  font-size: 0.78rem;
+}
+
+.relationship-interpretation span {
+  color: #b7c6d3;
+  font-size: 0.74rem;
+  line-height: 1.35;
+}
+
+.relationship-evidence-grid {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr 1fr;
+  gap: 8px;
+  align-items: start;
+}
+
+.relationship-evidence {
+  display: grid;
+  align-content: start;
+  gap: 5px;
+  max-height: 260px;
+  overflow: auto;
+}
+
+.relationship-evidence--important {
+  border-left: 3px solid rgba(255, 197, 111, 0.86);
+  padding-left: 8px;
+}
+
+.relationship-evidence span {
+  color: #9facbc;
+  font-size: 0.72rem;
+}
+
+.relationship-evidence code {
+  font-size: 0.68rem;
+  padding: 4px 6px;
+}
+
+@media (max-width: 1100px) {
+  .relationship-verdict-card,
+  .relationship-flow-strip,
+  .relationship-evidence-grid {
+    grid-template-columns: 1fr;
+  }
+}

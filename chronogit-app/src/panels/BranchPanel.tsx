@@ -230,6 +230,62 @@ function BranchSubpanel({
   );
 }
 
+
+function relationshipVerdictTitle(relationship: BranchRelationshipPreview) {
+  if (relationship.classification === "IDENTICAL") return "Timelines are already aligned";
+  if (relationship.classification === "FAST_FORWARD_LEFT") return "Safe fast-forward available";
+  if (relationship.classification === "FAST_FORWARD_RIGHT") return "Reverse fast-forward available";
+  if (relationship.classification === "DIVERGED_CLEAN_PATHS") return "Diverged, but changed paths appear separate";
+  if (relationship.classification === "DIVERGED_SHARED_PATHS") return "Diverged with shared touched paths";
+  if (relationship.classification === "HIGH_RISK") return "High-risk relationship";
+  return relationship.classification.replace(/_/g, " ");
+}
+
+function relationshipInterpretation(relationship: BranchRelationshipPreview) {
+  if (relationship.shared_touched_files.length > 0) {
+    return "Review shared touched paths before any merge/rebase operation. Shared paths do not guarantee a conflict, but they are the primary collision surface.";
+  }
+
+  if (relationship.can_fast_forward_left || relationship.can_fast_forward_right) {
+    return "This relationship looks like a fast-forward case. One timeline can move to the other without creating a merge commit.";
+  }
+
+  if (relationship.left_ahead > 0 && relationship.right_ahead > 0) {
+    return "Both timelines contain unique commits. Review intent and changed files before deciding how to rejoin them.";
+  }
+
+  return "No obvious collision surface is visible from this preview.";
+}
+
+function RelationshipEvidenceGroup({
+  title,
+  files,
+  defaultOpen,
+  important,
+}: {
+  title: string;
+  files: string[];
+  defaultOpen: boolean;
+  important?: boolean;
+}) {
+  return (
+    <BranchSubpanel
+      title={`${title} (${files.length})`}
+      subtitle={files.length ? "Changed path evidence" : "No paths in this group"}
+      defaultOpen={defaultOpen}
+      important={important}
+    >
+      <div className={important ? "relationship-evidence relationship-evidence--important" : "relationship-evidence"}>
+        {files.length ? (
+          files.map((file) => <code key={`${title}-${file}`}>{file}</code>)
+        ) : (
+          <span>No files detected.</span>
+        )}
+      </div>
+    </BranchSubpanel>
+  );
+}
+
 export function BranchPanel({
   beginnerMode,
   repoPath,
@@ -403,50 +459,75 @@ export function BranchPanel({
         ) : null}
 
         {relationship ? (
-          <section className="branch-relationship-result">
-            <div className="branch-relationship-result__header">
-                <div>
-                  <strong>{relationship.classification}</strong>
-                  <span>{relationship.left_branch} ↔ {relationship.right_branch}</span>
-                </div>
-                <em className={`risk-pill risk-pill--${relationship.risk_level.toLowerCase()}`}>
-                  {relationship.risk_level}
-                </em>
+          <section className={`branch-relationship-result branch-relationship-result--${relationship.risk_level.toLowerCase()}`}>
+            <div className="relationship-verdict-card">
+              <div>
+                <span className="cg-eyebrow">Relationship verdict</span>
+                <h3>{relationshipVerdictTitle(relationship)}</h3>
+                <p>{relationship.summary}</p>
+              </div>
+              <em className={`relationship-risk relationship-risk--${relationship.risk_level.toLowerCase()}`}>
+                {relationship.risk_level} risk
+              </em>
+            </div>
+
+            <div className="relationship-flow-strip">
+              <div>
+                <strong>{relationship.left_branch}</strong>
+                <span>+{relationship.left_ahead} unique commits</span>
+              </div>
+              <b>merge base</b>
+              <div>
+                <strong>{relationship.right_branch}</strong>
+                <span>+{relationship.right_ahead} unique commits</span>
+              </div>
             </div>
 
             <div className="branch-relationship-grid">
-                <div><strong>{relationship.left_ahead}</strong><span>left-only commits</span></div>
-                <div><strong>{relationship.right_ahead}</strong><span>right-only commits</span></div>
-                <div><strong>{relationship.shared_touched_files.length}</strong><span>shared touched paths</span></div>
-                <div><strong>{relationship.working_changes}</strong><span>working changes</span></div>
+              <div><strong>{relationship.left_ahead}</strong><span>left-only commits</span></div>
+              <div><strong>{relationship.right_ahead}</strong><span>right-only commits</span></div>
+              <div className={relationship.shared_touched_files.length ? "relationship-metric--warning" : ""}>
+                <strong>{relationship.shared_touched_files.length}</strong><span>shared touched paths</span>
+              </div>
+              <div><strong>{relationship.working_changes}</strong><span>working changes</span></div>
             </div>
 
-            <p>{relationship.summary}</p>
-            <p>{relationship.warning}</p>
+            <section className={relationship.shared_touched_files.length ? "relationship-interpretation relationship-interpretation--warning" : "relationship-interpretation"}>
+              <strong>Recommended interpretation</strong>
+              <span>{relationshipInterpretation(relationship)}</span>
+              <span>{relationship.warning}</span>
+            </section>
 
-            <div className="branch-relationship-meta">
+            <div className="relationship-evidence-grid">
+              <RelationshipEvidenceGroup
+                title="Shared touched files"
+                files={relationship.shared_touched_files}
+                defaultOpen={relationship.shared_touched_files.length > 0}
+                important={relationship.shared_touched_files.length > 0}
+              />
+              <RelationshipEvidenceGroup
+                title="Left-only files"
+                files={relationship.left_only_files}
+                defaultOpen={false}
+              />
+              <RelationshipEvidenceGroup
+                title="Right-only files"
+                files={relationship.right_only_files}
+                defaultOpen={false}
+              />
+            </div>
+
+            <BranchSubpanel
+              title="Technical evidence"
+              subtitle="Commit hashes used for deterministic relationship inspection."
+              defaultOpen={false}
+            >
+              <div className="branch-relationship-meta">
                 <span><strong>Merge base</strong><code>{relationship.merge_base.slice(0, 12)}</code></span>
                 <span><strong>Left HEAD</strong><code>{relationship.left_head.slice(0, 12)}</code></span>
                 <span><strong>Right HEAD</strong><code>{relationship.right_head.slice(0, 12)}</code></span>
-            </div>
-
-            <div className="branch-relationship-columns">
-                <div>
-                  <strong>Left-only files ({relationship.left_only_files.length})</strong>
-                  {relationship.left_only_files.slice(0, 12).map((file) => <code key={`left-file-${file}`}>{file}</code>)}
-                  {relationship.left_only_files.length > 12 ? <span>+{relationship.left_only_files.length - 12} more</span> : null}
-                </div>
-                <div>
-                  <strong>Right-only files ({relationship.right_only_files.length})</strong>
-                  {relationship.right_only_files.slice(0, 12).map((file) => <code key={`right-file-${file}`}>{file}</code>)}
-                  {relationship.right_only_files.length > 12 ? <span>+{relationship.right_only_files.length - 12} more</span> : null}
-                </div>
-                <div>
-                  <strong>Shared touched files ({relationship.shared_touched_files.length})</strong>
-                  {relationship.shared_touched_files.slice(0, 12).map((file) => <code key={`shared-file-${file}`}>{file}</code>)}
-                  {relationship.shared_touched_files.length > 12 ? <span>+{relationship.shared_touched_files.length - 12} more</span> : null}
-                </div>
-            </div>
+              </div>
+            </BranchSubpanel>
           </section>
         ) : null}
       </BranchSubpanel>
