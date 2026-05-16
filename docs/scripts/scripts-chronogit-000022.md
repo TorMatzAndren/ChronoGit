@@ -4,8 +4,8 @@ Date: 2026-05-07
 Author: Matz
 Type: scripts
 Subsystem: change-lists
-Updated: 2026-05-07
-Revision: 1
+Updated: 2026-05-16
+Revision: 2
 
 ---
 
@@ -20,13 +20,16 @@ Revision: 1
 @semantic:file-mutation-actions
 @semantic:risk-grouping
 @semantic:llm-explain-ui
+@semantic:bulk-unstage
+@semantic:folder-recovery
+@semantic:staged-prefix-recovery
 @semantic:educational-ui
 @state:active
 
 # ChangeListsPanel.tsx
 
 **Date:** 2026-05-07
-**Summary:** File change list panel for ChronoGit. Renders staged and working-tree file changes, groups them by risk class, exposes file-level Git actions, provides inline explanations, and supports advisory LLM explanation requests for individual file states.
+**Summary:** File change list panel for ChronoGit. Renders staged and working-tree file changes, groups them by risk class, exposes file-level Git actions, supports grouped staged-folder recovery workflows, provides inline explanations, and supports advisory LLM explanation requests for individual file states.
 **Keywords:** change lists, staged files, working tree, file actions, git status, risk grouping, file state explanation
 **Tags:** scripts, frontend, react, git-status, file-actions, staged-files, working-tree, llm
 
@@ -948,6 +951,280 @@ This document is based on full-file inspection of:
 No undocumented behavior has been inferred beyond directly visible source logic.
 
 ---
+
+
+---
+
+# 2026-05-16 Update: Bulk Staged-Folder Recovery Workflow
+
+This update documents the staged-folder recovery workflow added after accidental bulk staging edge cases were discovered during real repository usage.
+
+The panel now supports grouped staged-folder recovery through:
+
+    git_unstage_prefix
+
+This allows users to remove large staged folder trees from the next commit without deleting underlying files.
+
+The feature exists primarily as a safety and recovery workflow.
+
+---
+
+# Expanded FileAction Type
+
+Additional action:
+
+    git_unstage_prefix
+
+Purpose:
+
+Requests grouped staged-prefix recovery from parent orchestration.
+
+This action differs from:
+
+    git_unstage
+
+because it targets multiple staged files sharing a path prefix.
+
+---
+
+# topFolder Helper
+
+## Signature
+
+    function topFolder(path: string)
+
+Purpose:
+
+Extracts the highest-level folder prefix from a file path.
+
+---
+
+## Behavior
+
+The helper:
+
+- strips surrounding quotes
+- splits on `/`
+- ignores empty segments
+- returns:
+
+    <top-folder>/
+
+for nested paths
+
+Returns empty string for:
+
+- root files
+- single-segment paths
+
+---
+
+## Role
+
+This helper exists specifically to support grouped staged-folder cognition.
+
+It is projection-only.
+
+It does not mutate Git state.
+
+---
+
+# stagedFolderGroups Helper
+
+## Signature
+
+    function stagedFolderGroups(staged: FileChange[])
+
+Purpose:
+
+Detects unusually large staged folder groups that may represent accidental staging events.
+
+---
+
+## Internal Grouping
+
+Uses:
+
+    Map<string, FileChange[]>
+
+Grouping key:
+
+    topFolder(change.path)
+
+---
+
+## Inclusion Rules
+
+Folders are only surfaced when:
+
+    rows.length >= 5
+
+Purpose:
+
+Avoids noisy UI for small staged groups while still surfacing dangerous bulk-stage situations.
+
+---
+
+## Sorting Behavior
+
+Groups are sorted descending by staged-file count.
+
+Largest staged folder appears first.
+
+---
+
+# folderGroups State Projection
+
+Inside `ChangeListsPanel`:
+
+    const folderGroups = stagedFolderGroups(staged);
+
+Purpose:
+
+Creates a deterministic staged-folder recovery projection derived from staged Git truth.
+
+---
+
+# Bulk Recovery Section
+
+## Rendering Conditions
+
+The bulk recovery section renders only when:
+
+    folderGroups.length > 0
+
+---
+
+## Purpose
+
+The section exists to help users recover from accidental bulk staging situations.
+
+Example cases include:
+
+- downloaded media libraries
+- generated output folders
+- backups
+- extracted archives
+- temporary build folders
+
+---
+
+## UI Text
+
+The section explicitly explains:
+
+    You can remove a whole folder from the next commit without deleting the files.
+
+This distinction is important because users may incorrectly assume unstaging removes files from disk.
+
+---
+
+# Bulk Recovery Actions
+
+Each folder group renders:
+
+- folder name
+- staged file count
+- grouped recovery button
+
+Action:
+
+    runFileAction("git_unstage_prefix", folder)
+
+---
+
+## Safety Characteristics
+
+The grouped recovery workflow:
+
+- only removes files from staging
+- does not delete files
+- does not restore working tree contents
+- does not mutate unstaged file contents
+
+This is intentionally recovery-oriented rather than destructive.
+
+---
+
+# Edge-Case Origin
+
+This workflow originated from real-world accidental staging of large MP3 download folders during ChronoGit testing.
+
+The resulting UX doctrine is:
+
+    user mistakes are valuable edge-case discovery opportunities
+
+The feature therefore exists as a hardened recovery surface rather than a theoretical Git abstraction.
+
+---
+
+# Updated Architectural Role
+
+The panel now acts not only as a file-status viewer, but also as:
+
+- accidental staging recovery surface
+- grouped staging cognition layer
+- bulk staged-folder safety workflow
+
+This expands the panel from purely per-file interaction into grouped workflow recovery.
+
+---
+
+# Updated Mutation Boundaries
+
+New delegated mutation request:
+
+    git_unstage_prefix
+
+The component still performs no direct Git execution itself.
+
+All mutation requests remain parent-controlled.
+
+---
+
+# Updated Safety Systems
+
+Additional safety surfaces now include:
+
+- grouped staged-folder detection
+- large-folder recovery warnings
+- staged-file count visibility
+- recovery-oriented language
+- deterministic grouped recovery workflow
+
+---
+
+# Updated Known Gaps
+
+Known gaps after this update:
+
+- no nested folder hierarchy visualization
+- no partial grouped unstage selection
+- no file-extension grouping
+- no automatic generated-folder detection
+- no staged-size estimation
+- no explicit "accidental bulk stage" heuristic scoring
+- no inline confirmation dialog for grouped recovery
+- no undo surface after grouped unstage
+- no preview of affected files before grouped recovery
+
+---
+
+# Verification Notes for 2026-05-16 Update
+
+This update is based on full-file inspection of:
+
+- `src/panels/ChangeListsPanel.tsx`
+
+The update specifically documents:
+
+- grouped staged-folder detection
+- staged prefix grouping
+- bulk unstage workflows
+- accidental staging recovery surfaces
+- `git_unstage_prefix` action routing
+
+No undocumented behavior has been inferred beyond directly visible source logic.
 
 # Status
 

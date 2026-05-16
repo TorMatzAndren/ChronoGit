@@ -4,8 +4,8 @@ Date: 2026-05-07
 Author: Matz
 Type: scripts
 Subsystem: git-operations
-Updated: 2026-05-07
-Revision: 1
+Updated: 2026-05-16
+Revision: 2
 
 ---
 
@@ -20,6 +20,11 @@ Revision: 1
 @semantic:remote-operations
 @semantic:commit-operations
 @semantic:git-state-refresh
+@semantic:branch-relationship
+@semantic:merge-preview
+@semantic:merge-execution
+@semantic:merge-risk-explanation
+@semantic:comparison-explanation
 @semantic:frontend-action-api
 @semantic:async-operation-layer
 @state:active
@@ -27,7 +32,7 @@ Revision: 1
 # gitActions.ts
 
 **Date:** 2026-05-07
-**Summary:** Frontend Git action bridge layer for ChronoGit. Provides strongly typed asynchronous wrappers around Tauri invoke commands for Git status retrieval, file operations, commit execution, remote previews, push/pull execution, and Git operation recovery actions.
+**Summary:** Frontend Git action bridge layer for ChronoGit. Provides strongly typed asynchronous wrappers around Tauri invoke commands for Git status retrieval, branch relationship inspection, merge preview/execution, comparison explanation, merge-risk explanation, file operations, commit execution, remote previews, push/pull execution, and Git recovery workflows.
 **Keywords:** Tauri invoke, Git actions, frontend backend bridge, remote operations, commit operations, Git status, async actions, typed invoke layer
 **Tags:** scripts, git-operations, tauri, frontend, backend-bridge, invoke-layer, git-runtime
 
@@ -592,6 +597,392 @@ This document is based on full-file inspection of:
 No undocumented behavior has been inferred beyond directly visible source logic.
 
 ---
+
+
+---
+
+# 2026-05-16 Update: Branch Relationship, Merge Workflow, and LLM Explanation Actions
+
+This update documents the expanded invoke-layer responsibilities added after the original Git operation bridge implementation.
+
+The file now acts as the central frontend action API for:
+
+- branch relationship inspection
+- merge preview loading
+- merge execution
+- comparison explanation dispatch
+- merge-risk explanation dispatch
+- bulk staged-folder recovery
+
+The module still contains no direct Git execution logic.
+
+All Git truth remains delegated to backend Tauri commands.
+
+---
+
+# Expanded Runtime Type Dependencies
+
+Additional imported runtime contracts now include:
+
+- `BranchMergePreview`
+- `BranchMergeResult`
+- `BranchRelationshipPreview`
+- `CommitComparison`
+- `ExplainDiffResult`
+
+These extend the IPC layer from basic Git operations into branch cognition and LLM explanation workflows.
+
+---
+
+# Branch Relationship Operations
+
+## inspectBranchRelationship()
+
+Signature:
+
+    export async function inspectBranchRelationship(...)
+
+Invokes:
+
+    git_branch_relationship_preview
+
+Arguments:
+
+- `repoPath`
+- `leftBranch`
+- `rightBranch`
+
+Returns:
+
+    Promise<BranchRelationshipPreview>
+
+Purpose:
+
+Loads deterministic relationship analysis between two branch timelines.
+
+This operation is inspection-only.
+
+No repository mutation occurs.
+
+---
+
+# Merge Preview Operations
+
+## previewBranchMerge()
+
+Signature:
+
+    export async function previewBranchMerge(...)
+
+Invokes:
+
+    git_merge_branch_preview
+
+Arguments:
+
+- `repoPath`
+- `targetBranch`
+
+Returns:
+
+    Promise<BranchMergePreview>
+
+Purpose:
+
+Loads deterministic merge-readiness truth before merge execution.
+
+This includes:
+
+- merge mode
+- blocker state
+- shared touched files
+- risk labels
+- confirmation requirements
+- allowed/disallowed merge status
+
+The operation is preview-only.
+
+---
+
+# Merge Execution Operations
+
+## executeBranchMerge()
+
+Signature:
+
+    export async function executeBranchMerge(...)
+
+Invokes:
+
+    git_merge_branch_execute
+
+Arguments:
+
+- `repoPath`
+- `targetBranch`
+- `confirmation`
+
+Returns:
+
+    Promise<BranchMergeResult>
+
+Purpose:
+
+Executes merge operations only after frontend confirmation gates have been satisfied.
+
+The explicit confirmation string requirement creates a typed safety boundary between preview and execution.
+
+---
+
+# Expanded File Operations
+
+## executeFileAction()
+
+Supported actions now include:
+
+- `git_stage`
+- `git_unstage`
+- `git_unstage_prefix`
+- `git_restore`
+- `git_remove_untracked`
+- `git_ignore_path`
+
+---
+
+## git_unstage_prefix
+
+Purpose:
+
+Allows grouped staged-file recovery by path prefix.
+
+Used primarily by:
+
+    ChangeListsPanel.tsx
+
+for accidental bulk staging recovery workflows.
+
+Example use case:
+
+- user accidentally stages a downloads folder
+- grouped staged prefix is removed from index in one action
+
+This operation only removes files from staging.
+
+It does not delete the underlying files.
+
+---
+
+# Commit Comparison Operations
+
+## compareCommits()
+
+Signature:
+
+    export async function compareCommits(...)
+
+Invokes:
+
+    git_compare_commits
+
+Arguments:
+
+- `repoPath`
+- `leftCommit`
+- `rightCommit`
+
+Returns:
+
+    Promise<CommitComparison>
+
+Purpose:
+
+Loads deterministic comparison truth between two commits or branch heads.
+
+Returned comparison data includes:
+
+- changed file list
+- insertion count
+- deletion count
+- raw diff text
+
+This comparison surface is reused by:
+
+- TimeMachinePanel
+- BranchPanel merge-risk explanation workflow
+
+---
+
+# Comparison Explanation Operations
+
+## explainComparisonWithOllama()
+
+Signature:
+
+    export async function explainComparisonWithOllama(...)
+
+Invokes:
+
+    explain_comparison_with_ollama
+
+Arguments:
+
+- `model`
+- `comparison`
+
+Returns:
+
+    Promise<ExplainDiffResult>
+
+Purpose:
+
+Delegates commit comparison interpretation to the selected local LLM.
+
+The wrapper converts structured comparison data into the backend payload shape required by the explanation endpoint.
+
+---
+
+## Explanation Payload Construction
+
+The wrapper constructs:
+
+- left label
+- right label
+- changed file count
+- insertion count
+- deletion count
+- normalized changed-file text
+- raw diff
+
+This keeps payload normalization centralized.
+
+---
+
+# Merge-Risk Explanation Operations
+
+## explainMergeRiskWithOllama()
+
+Signature:
+
+    export async function explainMergeRiskWithOllama(...)
+
+Invokes:
+
+    explain_merge_risk_with_ollama
+
+Arguments include:
+
+- `currentBranch`
+- `incomingBranch`
+- `mode`
+- `riskLevel`
+- `sharedFilesText`
+- `changedFilesText`
+- `diff`
+
+Returns:
+
+    Promise<ExplainDiffResult>
+
+Purpose:
+
+Provides structured merge-risk explanation support for BranchPanel merge cognition workflows.
+
+---
+
+## Structured Merge-Risk Design
+
+Unlike raw diff explanation, merge-risk explanation intentionally sends structured merge context.
+
+This reduces:
+
+- hallucinated implementation advice
+- irrelevant code-review behavior
+- overly granular line-by-line reasoning
+
+and instead focuses the LLM on:
+
+- merge safety
+- branch divergence
+- shared touched paths
+- operational merge risk
+
+---
+
+# Updated Architectural Role
+
+The file now acts as the primary frontend action API for:
+
+- Git operations
+- branch cognition
+- merge cognition
+- commit comparison
+- local LLM explanation orchestration
+
+while still remaining:
+
+- invoke-only
+- backend-separated
+- deterministic in interface shape
+
+---
+
+# Updated Mutation Boundaries
+
+Potential mutation operations now additionally include:
+
+- `git_merge_branch_execute`
+- `git_unstage_prefix`
+
+Relationship and comparison operations remain non-mutating.
+
+---
+
+# Updated Safety Characteristics
+
+Additional safety surfaces now include:
+
+- preview-before-merge workflow
+- typed merge confirmation
+- structured merge-risk explanation
+- separated relationship inspection
+- centralized comparison loading
+- grouped staged-file recovery support
+
+---
+
+# Updated Known Gaps
+
+Known gaps after this update:
+
+- no request cancellation
+- no invoke timeout handling
+- no streaming explanation support
+- no optimistic merge-state handling
+- no backend capability discovery
+- no invoke retry policy
+- no LLM result validation
+- no explanation caching
+- no unified error normalization
+- no batch invoke abstraction
+
+---
+
+# Verification Notes for 2026-05-16 Update
+
+This update is based on full-file inspection of:
+
+- `src/core/gitActions.ts`
+
+The update specifically documents:
+
+- branch relationship wrappers
+- merge preview wrappers
+- merge execution wrappers
+- comparison wrappers
+- merge-risk explanation wrappers
+- staged-prefix recovery support
+
+No undocumented behavior has been inferred beyond directly visible source logic.
 
 # Status
 

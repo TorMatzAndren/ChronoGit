@@ -4,8 +4,8 @@ Date: 2026-05-07
 Author: Matz
 Type: scripts
 Subsystem: workspace-components
-Updated: 2026-05-07
-Revision: 1
+Updated: 2026-05-16
+Revision: 2
 
 ---
 
@@ -18,13 +18,16 @@ Revision: 1
 @semantic:searchable-selector
 @semantic:interactive-ui
 @semantic:selection-surface
+@semantic:branch-selection
+@semantic:relationship-selection
+@semantic:merge-selection
 @semantic:component-library
 @state:active
 
 # ChronoDropdown.tsx
 
 **Date:** 2026-05-07
-**Summary:** Searchable interactive dropdown component used for deterministic selection workflows within the ChronoGit workspace UI. Supports filtering, selection rendering, outside-click closing behavior, and structured option metadata.
+**Summary:** Searchable interactive dropdown component used for deterministic selection workflows within the ChronoGit workspace UI. Supports filtering, structured branch/merge selection, outside-click dismissal, searchable relationship selection, badge rendering, and reusable deterministic workflow navigation surfaces.
 **Keywords:** dropdown, selector, searchable dropdown, workspace ui, component library, option selector
 **Tags:** scripts, frontend, react, ui, dropdown, components, workspace
 
@@ -704,6 +707,217 @@ This document is based on full-file inspection of:
 No undocumented behavior has been inferred beyond directly visible source logic.
 
 ---
+
+
+---
+
+# 2026-05-16 Update: Branch Workflow and Merge Selection Expansion
+
+This update documents the expanded operational role of `ChronoDropdown.tsx` after ChronoGit’s branch cognition and merge workflow expansion.
+
+The component is now a core reusable selection surface for:
+
+- branch relationship inspection
+- merge-target selection
+- searchable branch workflows
+- semantic branch comparison UX
+
+The component still remains backend-free and presentation-oriented.
+
+---
+
+# Expanded ChronoDropdownOption Type
+
+## New badge Field
+
+Additional field:
+
+    badge?: string
+
+Purpose:
+
+Allows lightweight semantic metadata rendering beside dropdown options.
+
+The badge participates in:
+
+- search indexing
+- fallback secondary rendering
+
+This is useful for branch-selection workflows where small semantic indicators improve usability.
+
+---
+
+# Updated Filtering Surface
+
+Filtering logic now searches across:
+
+- title
+- subtitle
+- badge
+
+Implementation surface:
+
+    `${option.title} ${option.subtitle || ""} ${option.badge || ""}`
+
+This expanded search surface improves branch workflow discoverability.
+
+---
+
+# Updated Placeholder Semantics
+
+The component now separates:
+
+- selection placeholder
+- search placeholder
+
+through:
+
+- `placeholder`
+- `searchPlaceholder`
+
+This distinction is important for branch/merge workflows where:
+
+- closed control text
+- active search guidance
+
+serve different UX roles.
+
+---
+
+# searchPlaceholder
+
+Type:
+
+    string | undefined
+
+Default:
+
+    "Search..."
+
+Purpose:
+
+Controls text inside the active search input.
+
+This differs from the main selection placeholder shown before selection.
+
+---
+
+# emptyText
+
+Type:
+
+    string | undefined
+
+Default:
+
+    "No matches."
+
+Purpose:
+
+Allows workflow-specific empty-state messaging.
+
+This is especially useful in branch workflows where filtered branch sets may legitimately be empty.
+
+---
+
+# Updated Selection Display Semantics
+
+The component now prefers:
+
+- subtitle
+- badge
+- value
+
+in that order for secondary metadata rendering.
+
+Implementation:
+
+    option.subtitle || option.badge || option.value
+
+This allows concise semantic labeling without requiring long subtitles.
+
+---
+
+# Branch Workflow Role
+
+`ChronoDropdown` is now heavily used by:
+
+    BranchPanel.tsx
+
+for:
+
+- left branch selection
+- right branch selection
+- incoming merge branch selection
+
+This makes the component part of ChronoGit’s branch cognition workflow layer.
+
+---
+
+# Screenshot-Friendly UI Role
+
+The component intentionally avoids native operating-system dropdown widgets.
+
+Reasons include:
+
+- deterministic styling
+- predictable screenshots
+- controlled interaction behavior
+- workspace-consistent rendering
+- portable visual cognition
+
+This is important for ChronoGit documentation, demos, and educational workflows.
+
+---
+
+# Deterministic Selection Surface
+
+The component now acts as a deterministic branch-selection primitive.
+
+It supports:
+
+- semantic branch inspection
+- merge target selection
+- branch comparison
+- searchable workflow navigation
+
+without embedding Git logic itself.
+
+---
+
+# Updated Known Gaps
+
+Known gaps after this update:
+
+- no keyboard arrow navigation
+- no Enter-key selection
+- no Escape-key close behavior
+- no focus restoration
+- no grouped-option rendering
+- no virtualization for large branch sets
+- no async option loading
+- no multi-select support
+- no ARIA-expanded attributes
+- no typeahead navigation memory
+
+---
+
+# Verification Notes for 2026-05-16 Update
+
+This update is based on full-file inspection of:
+
+- `src/components/ChronoDropdown.tsx`
+
+The update specifically documents:
+
+- badge support
+- expanded search surface
+- searchPlaceholder separation
+- branch workflow usage
+- merge selection role
+- deterministic selection semantics
+
+No undocumented behavior has been inferred beyond directly visible source logic.
 
 # Status
 

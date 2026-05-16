@@ -4,8 +4,8 @@ Date: 2026-05-04
 Author: Matz
 Type: scripts
 Subsystem: control-api
-Updated: 2026-05-08
-Revision: 6
+Updated: 2026-05-16
+Revision: 7
 
 ---
 
@@ -24,6 +24,12 @@ Revision: 6
 @semantic:git-remote-preview
 @semantic:merge-safety-prediction
 @semantic:operation-state-detection
+@semantic:branch-relationship-preview
+@semantic:branch-merge-preview
+@semantic:branch-merge-execution
+@semantic:merge-abort
+@semantic:gitignore-conflict-resolution
+@semantic:bulk-unstage
 @semantic:git-temporal
 @semantic:file-lineage
 @semantic:commit-comparison
@@ -38,7 +44,7 @@ Revision: 6
 # lib.rs
 
 **Date:** 2026-05-04  
-**Summary:** Tauri backend execution and truth layer for ChronoGit. Provides controlled Git CLI execution, repository discovery, branch management, branch graph extraction, guarded remote operations, merge-safety prediction, Time Machine history/diff/lineage systems, file mutation commands, local Ollama integration, streamed LLM explanation events, GPU power-limit management for non-streaming LLM calls, and local backup persistence commands.  
+**Summary:** Tauri backend execution and truth layer for ChronoGit. Provides controlled Git CLI execution, repository discovery, branch management, branch graph extraction, branch relationship inspection, guarded branch merge preview/execution, merge abort, narrow .gitignore conflict auto-resolution, bulk staged-prefix recovery, guarded remote operations, merge-safety prediction, Time Machine history/diff/lineage systems, file mutation commands, local Ollama integration, streamed LLM explanation events, GPU power-limit management for non-streaming LLM calls, and local backup persistence commands.  
 **Keywords:** tauri backend, git cli, branch graph, remote preview, merge safety, branch switching, time machine, lineage, ollama, streaming llm, gpu tdp, backup persistence  
 **Tags:** scripts, backend, control-api, git, tauri, branch-graph, time-machine, remote-awareness, llm
 
@@ -1594,6 +1600,682 @@ The document intentionally distinguishes:
 No behavior outside directly verified source has been documented.
 
 ---
+
+
+---
+
+# 2026-05-16 Update: Branch Relationship, Merge Execution, Conflict Recovery, and Bulk Unstage Backend
+
+This update documents backend behavior added after the previous script documentation revision.
+
+The backend now supports a broader branch-workflow safety surface:
+
+- branch relationship preview
+- merge preview
+- guarded merge execution
+- merge abort
+- narrow `.gitignore` conflict auto-resolution
+- staged-prefix unstage recovery
+- merge-risk LLM explanation
+- registered backend commands for these workflows
+
+All of these remain local-only Git/Ollama operations.
+
+---
+
+# New Runtime Structures
+
+## BranchRelationshipPreview
+
+Defines branch-to-branch comparison truth.
+
+Fields include:
+
+- `repo_path`
+- `left_branch`
+- `right_branch`
+- `left_head`
+- `right_head`
+- `merge_base`
+- `left_only_commits`
+- `right_only_commits`
+- `left_only_files`
+- `right_only_files`
+- `shared_touched_files`
+- `insertions`
+- `deletions`
+- `left_ahead`
+- `right_ahead`
+- `can_fast_forward_left`
+- `can_fast_forward_right`
+- `classification`
+- `risk_level`
+- `working_changes`
+- `summary`
+- `warning`
+
+Purpose:
+
+Provides deterministic backend truth for the BranchPanel relationship inspector.
+
+---
+
+## BranchMergePreview
+
+Defines merge-readiness truth before executing a merge.
+
+Fields include:
+
+- `repo_path`
+- `current_branch`
+- `target_branch`
+- `mode`
+- `risk_level`
+- `allowed`
+- `required_confirmation`
+- `blockers`
+- `consequence`
+- `warning`
+- `relationship`
+
+Purpose:
+
+Allows the frontend to explain and gate a pending merge before mutation.
+
+---
+
+## BranchMergeResult
+
+Defines merge execution result:
+
+- `ok`
+- `message`
+- `stdout`
+- `stderr`
+
+Purpose:
+
+Preserves Git merge stdout/stderr for frontend review.
+
+---
+
+# Branch Relationship Helpers
+
+## rev_parse_commit
+
+Validates and resolves a branch or commit reference to a commit hash.
+
+Uses:
+
+    git rev-parse --verify <reference>^{commit}
+
+Returns an error if the reference is not a valid commit.
+
+---
+
+## merge_base
+
+Finds the common ancestor of two refs.
+
+Uses:
+
+    git merge-base <left> <right>
+
+Purpose:
+
+Provides merge-base truth for branch relationship previews.
+
+---
+
+## diff_numstat
+
+Computes insertion/deletion counts between two refs.
+
+Uses:
+
+    git diff --numstat <left> <right>
+
+Purpose:
+
+Adds numeric churn information to branch relationship previews.
+
+---
+
+# Branch Relationship Preview Command
+
+## git_branch_relationship_preview
+
+Command:
+
+    git_branch_relationship_preview
+
+Purpose:
+
+Compares two branch timelines without mutating the repository.
+
+Inputs:
+
+- `repo_path`
+- `left_branch`
+- `right_branch`
+
+Validation:
+
+- both branch names must be non-empty
+- branch names must differ
+- both refs must resolve to commits
+
+Backend Git operations include:
+
+- `rev-parse`
+- `merge-base`
+- directional commit preview
+- directional changed-file preview
+- `diff --numstat`
+- working-tree change count
+
+---
+
+## Relationship Ranges
+
+Left-only range:
+
+    <right_branch>..<left_branch>
+
+Right-only range:
+
+    <left_branch>..<right_branch>
+
+These are used to compute directional commits and changed paths.
+
+---
+
+## Shared Touched Files
+
+The backend builds two path sets:
+
+- left-only changed paths
+- right-only changed paths
+
+Then computes:
+
+    left_paths ∩ right_paths
+
+as `shared_touched_files`.
+
+Important boundary:
+
+Shared touched files do not guarantee a conflict.
+
+They indicate same-path branch overlap requiring review.
+
+---
+
+## Relationship Classification
+
+Generated classifications include:
+
+- `IDENTICAL`
+- `FAST_FORWARD_LEFT`
+- `FAST_FORWARD_RIGHT`
+- `HIGH_RISK`
+- `DIVERGED_SHARED_PATHS`
+- `DIVERGED_CLEAN_PATHS`
+
+---
+
+## Relationship Risk Levels
+
+Generated risk levels include:
+
+- `LOW`
+- `MEDIUM`
+- `HIGH`
+
+Working-tree dirtiness can raise otherwise simple cases to `MEDIUM`.
+
+Shared touched files plus working changes can become `HIGH`.
+
+---
+
+# Branch Merge Preview Command
+
+## git_merge_branch_preview
+
+Command:
+
+    git_merge_branch_preview
+
+Purpose:
+
+Builds merge-readiness truth for merging a selected target branch into the current branch.
+
+Inputs:
+
+- `repo_path`
+- `target_branch`
+
+Validation:
+
+- current branch must be resolvable
+- target branch must be non-empty
+- target branch must differ from current branch
+
+Uses:
+
+- `current_branch`
+- `git_branch_relationship_preview`
+- `git_operation_state`
+
+---
+
+## Merge Blockers
+
+The preview blocks merging when:
+
+- merge is already in progress
+- rebase is already in progress
+- cherry-pick is in progress
+- revert is in progress
+- conflicted files exist
+- working tree has uncommitted changes
+
+These blockers are returned as plain strings in:
+
+    blockers
+
+---
+
+## Merge Modes
+
+Generated merge modes include:
+
+- `ALREADY_UP_TO_DATE`
+- `FAST_FORWARD`
+- `NORMAL_MERGE`
+- `RISKY_MERGE`
+
+Mode rules:
+
+- no branch-only commits on either side → `ALREADY_UP_TO_DATE`
+- current branch can fast-forward → `FAST_FORWARD`
+- shared touched paths exist → `RISKY_MERGE`
+- otherwise → `NORMAL_MERGE`
+
+---
+
+## Merge Risk Level
+
+Risk rules:
+
+- blockers present → `HIGH`
+- risky merge → `HIGH`
+- normal merge → `MEDIUM`
+- fast-forward / already-up-to-date → `LOW`
+
+---
+
+## Required Confirmation
+
+High-risk previews require:
+
+    override
+
+Other allowed merge previews require:
+
+    merge
+
+The required token is returned to the frontend as:
+
+    required_confirmation
+
+---
+
+## Merge Allowed Flag
+
+`allowed` is true only when:
+
+- no blockers exist
+- mode is not `ALREADY_UP_TO_DATE`
+
+The backend therefore prevents accidental execution of blocked or redundant merges.
+
+---
+
+# Branch Merge Execution Command
+
+## git_merge_branch_execute
+
+Command:
+
+    git_merge_branch_execute
+
+Purpose:
+
+Executes a previously previewed branch merge through Git.
+
+Inputs:
+
+- `repo_path`
+- `target_branch`
+- `confirmation`
+
+Execution flow:
+
+1. rebuilds merge preview
+2. refuses execution if preview is not allowed
+3. requires exact confirmation token
+4. runs `git merge`
+5. returns structured stdout/stderr on success
+6. returns detailed stdout/stderr on failure
+
+---
+
+## Git Merge Mode Selection
+
+If preview mode is:
+
+    FAST_FORWARD
+
+the backend runs:
+
+    git merge --ff-only <target_branch>
+
+Otherwise it runs:
+
+    git merge --no-edit <target_branch>
+
+This makes fast-forward merges stricter and normal/risky merges explicit merge operations.
+
+---
+
+# Merge Abort Command
+
+## git_merge_abort
+
+Command:
+
+    git_merge_abort
+
+Purpose:
+
+Aborts an in-progress Git merge.
+
+Safety checks:
+
+- calls `git_operation_state`
+- refuses if no merge is currently in progress
+
+Runs:
+
+    git merge --abort
+
+On success:
+
+    Merge aborted. Repository returned to the pre-merge state.
+
+---
+
+# .gitignore Conflict Auto-Resolution
+
+## resolve_gitignore_conflict_text
+
+Helper:
+
+    resolve_gitignore_conflict_text
+
+Purpose:
+
+Parses simple Git conflict marker blocks and combines both sides while removing duplicate lines.
+
+Supported marker shape:
+
+- `<<<<<<< ...`
+- `=======`
+- `>>>>>>> ...`
+
+Safety behavior:
+
+- rejects nested conflict markers
+- rejects unclosed conflict blocks
+- rejects files with no conflict markers
+- deduplicates kept lines within each conflict block
+- collapses repeated blank lines
+- trims trailing blank lines
+- ensures final newline
+
+---
+
+## git_resolve_gitignore_keep_both
+
+Command:
+
+    git_resolve_gitignore_keep_both
+
+Purpose:
+
+Narrow auto-resolution command for `.gitignore` merge conflicts.
+
+Safety checks:
+
+- merge must be in progress
+- `.gitignore` must be conflicted
+- `.gitignore` must be the only conflicted file
+
+Execution flow:
+
+1. reads `.gitignore`
+2. resolves conflict markers by keeping both sides
+3. writes resolved `.gitignore`
+4. stages the file with `git add -- .gitignore`
+
+This command intentionally does not attempt generic conflict resolution.
+
+---
+
+# Bulk Staged-Prefix Recovery
+
+## git_unstage
+
+The backend now uses:
+
+    git reset HEAD -- <path>
+
+for single-path unstage behavior.
+
+Purpose:
+
+Robustly removes a prepared path from the next commit.
+
+---
+
+## git_unstage_prefix
+
+Command:
+
+    git_unstage_prefix
+
+Purpose:
+
+Removes all prepared files under a folder/prefix from the next commit without deleting files.
+
+Safety flow:
+
+1. validates relative path
+2. trims trailing slash
+3. rejects empty prefix
+4. runs status check scoped to the prefix
+5. counts staged entries under that prefix
+6. refuses if no staged files exist
+7. runs:
+
+       git reset HEAD -- <prefix>
+
+8. returns count of removed prepared files
+
+This supports recovery from accidental bulk staging events.
+
+---
+
+# Merge-Risk LLM Explanation Command
+
+## explain_merge_risk_with_ollama
+
+Command:
+
+    explain_merge_risk_with_ollama
+
+Purpose:
+
+Provides a structured local LLM explanation for pending merge risk.
+
+Inputs:
+
+- `model`
+- `current_branch`
+- `incoming_branch`
+- `mode`
+- `risk_level`
+- `shared_files_text`
+- `changed_files_text`
+- `diff`
+
+Safety behavior:
+
+- validates selected model exists locally
+- rejects empty structured merge preview input
+- clips shared-file text
+- clips changed-file text
+- clips diff/preview text
+- uses GPU power-limit reduction for non-streaming inference
+- restores GPU power limit afterward
+- cleans returned text
+
+Prompt rules explicitly forbid:
+
+- Docker advice
+- deployment advice
+- refactoring advice
+- generic project advice
+- invented conflict details
+
+The command tells the model to explain only the pending merge.
+
+---
+
+# Comparison Explanation Prompt Hardening
+
+`explain_comparison_with_ollama` now includes stronger rules against overstating replacements.
+
+Hardening includes:
+
+- explain only visible comparison stats, changed-file list, and diff
+- do not claim files changed unless present in supplied lists/diff
+- classify important changes as additive, modifying, replacing, or removing
+- if old and new functions both remain visible, do not call it a replacement
+
+This reduces false certainty in A ↔ B Time Machine explanations.
+
+---
+
+# Updated Tauri Command Registration
+
+Additional registered commands now include:
+
+- `git_branch_relationship_preview`
+- `git_merge_branch_preview`
+- `git_merge_branch_execute`
+- `git_merge_abort`
+- `git_resolve_gitignore_keep_both`
+- `git_unstage_prefix`
+- `explain_merge_risk_with_ollama`
+
+These commands are visible in the `generate_handler!` registration list.
+
+---
+
+# Updated Mutation Boundaries
+
+New mutating commands include:
+
+- `git_merge_branch_execute`
+- `git_merge_abort`
+- `git_resolve_gitignore_keep_both`
+- `git_unstage_prefix`
+
+New non-mutating inspection/advisory commands include:
+
+- `git_branch_relationship_preview`
+- `git_merge_branch_preview`
+- `explain_merge_risk_with_ollama`
+
+Important distinction:
+
+- merge preview is inspection
+- merge execution is mutation
+- merge abort is mutation/recovery
+- `.gitignore` auto-resolution writes and stages exactly one file
+- staged-prefix recovery mutates the Git index but does not delete files
+
+---
+
+# Updated Safety Characteristics
+
+Additional safety characteristics include:
+
+- branch relationship preview validates refs
+- merge preview blocks active Git operations
+- merge preview blocks dirty working trees
+- merge execution requires exact confirmation text
+- fast-forward merges use `--ff-only`
+- normal/risky merges use `--no-edit`
+- merge abort refuses when no merge is active
+- `.gitignore` auto-resolution only runs for one specific conflicted file
+- `.gitignore` auto-resolution rejects multiple conflicted files
+- staged-prefix recovery verifies staged entries before resetting index
+- merge-risk LLM prompt forbids generic project advice
+
+---
+
+# Updated Known Gaps
+
+Known gaps after this update:
+
+- branch relationship classification uses string labels rather than Rust enums
+- merge mode uses string labels rather than Rust enums
+- merge preview does not simulate same-line conflict details
+- merge preview does not use `git merge-tree`
+- `.gitignore` auto-resolution supports only one narrow file/case
+- `.gitignore` resolver deduplicates whole lines only
+- `.gitignore` resolver does not preserve conflict-side comments about provenance
+- `git_unstage_prefix` operates on a prefix without previewing every affected file in the backend response
+- merge-risk LLM explanation is non-streaming only
+- merge execution uses `--no-edit` and does not expose merge message customization
+
+---
+
+# Verification Notes for 2026-05-16 Update
+
+This update is based on full-file inspection of:
+
+- `src-tauri/src/lib.rs`
+
+The update specifically documents:
+
+- `BranchRelationshipPreview`
+- `BranchMergePreview`
+- `BranchMergeResult`
+- `git_branch_relationship_preview`
+- `git_merge_branch_preview`
+- `git_merge_branch_execute`
+- `git_merge_abort`
+- `resolve_gitignore_conflict_text`
+- `git_resolve_gitignore_keep_both`
+- `git_unstage_prefix`
+- `explain_merge_risk_with_ollama`
+- updated command registration
+
+No undocumented behavior has been inferred beyond directly visible source logic.
 
 ## Status
 

@@ -873,6 +873,39 @@ ${context.rawTruth.slice(0, 12000)}`;
     }
   }
 
+  async function abortMerge() {
+    try {
+      setRemoteBusy("merge-abort");
+      const result = await invoke<string>("git_merge_abort", { repoPath: state.repoPath });
+      setMessage(result);
+      setLastAction(result);
+      appendSystemLog("action", result);
+      await refresh();
+    } catch (err) {
+      setMessage(`Abort merge failed: ${err}`);
+      appendSystemLog("error", `Abort merge failed: ${err}`);
+    } finally {
+      setRemoteBusy("");
+    }
+  }
+
+  async function resolveGitignoreKeepBoth() {
+    try {
+      setRemoteBusy("resolve-gitignore");
+      const result = await invoke<string>("git_resolve_gitignore_keep_both", { repoPath: state.repoPath });
+      setMessage(result);
+      setLastAction(result);
+      appendSystemLog("action", result);
+      await refresh();
+    } catch (err) {
+      setMessage(`Resolve .gitignore failed: ${err}`);
+      appendSystemLog("error", `Resolve .gitignore failed: ${err}`);
+    } finally {
+      setRemoteBusy("");
+    }
+  }
+
+
   function renderPanel(panel: PanelInstance) {
     if (panel.type === "current-state") {
       return (
@@ -1109,6 +1142,32 @@ ${context.rawTruth.slice(0, 12000)}`;
           <strong>{operationLabel(operationState)}</strong>
           <span>{operationState?.warning}</span>
           {operationState?.conflicted_files.map((file) => <code key={file}>{file}</code>)}
+
+          {operationState?.merge_in_progress && operationState.conflicted_files.length === 1 && operationState.conflicted_files[0] === ".gitignore" ? (
+            <section className="merge-conflict-recovery-card">
+              <strong>Simple .gitignore conflict detected</strong>
+              <span>
+                Both branches changed ignore rules. ChronoGit can safely keep both sides, remove duplicate lines, and prepare .gitignore for the merge commit.
+              </span>
+              <button
+                disabled={remoteBusy === "resolve-gitignore"}
+                onClick={() => { void resolveGitignoreKeepBoth(); }}
+              >
+                {remoteBusy === "resolve-gitignore" ? "Resolving..." : "Auto-resolve .gitignore by keeping both sides"}
+              </button>
+            </section>
+          ) : null}
+
+          {operationState?.merge_in_progress ? (
+            <button
+              className="danger-button"
+              disabled={remoteBusy === "merge-abort"}
+              onClick={() => { void abortMerge(); }}
+            >
+              {remoteBusy === "merge-abort" ? "Aborting merge..." : ui(state.beginnerMode, "Abort merge", "git merge --abort")}
+            </button>
+          ) : null}
+
           {operationState?.rebase_in_progress ? <button className="danger-button" onClick={abortRebase}>{ui(state.beginnerMode, "Abort rebase", "git rebase --abort")}</button> : null}
         </section>
       ) : null}

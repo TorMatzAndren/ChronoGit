@@ -3964,3 +3964,57 @@ code {
 .merge-review-actions button {
   font-size: 0.7rem;
 }
+
+/* CHRONOGIT_SIMPLE_CONFLICT_RECOVERY_V1 */
+.merge-conflict-recovery-card {
+  display: grid;
+  gap: 7px;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid rgba(100, 240, 200, 0.36);
+  border-radius: 11px;
+  background: rgba(100, 240, 200, 0.075);
+}
+
+.merge-conflict-recovery-card strong {
+  color: #dfffee;
+  font-size: 0.82rem;
+}
+
+.merge-conflict-recovery-card span {
+  color: #b8cad8;
+  font-size: 0.74rem;
+  line-height: 1.42;
+}
+
+.merge-conflict-recovery-card button {
+  justify-self: start;
+  font-size: 0.72rem;
+}
+
+/* CHRONOGIT_SIMPLE_CONFLICT_RECOVERY_V1 */
+.merge-conflict-recovery-card {
+  display: grid;
+  gap: 7px;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid rgba(100, 240, 200, 0.36);
+  border-radius: 11px;
+  background: rgba(100, 240, 200, 0.075);
+}
+
+.merge-conflict-recovery-card strong {
+  color: #dfffee;
+  font-size: 0.82rem;
+}
+
+.merge-conflict-recovery-card span {
+  color: #b8cad8;
+  font-size: 0.74rem;
+  line-height: 1.42;
+}
+
+.merge-conflict-recovery-card button {
+  justify-self: start;
+  font-size: 0.72rem;
+}

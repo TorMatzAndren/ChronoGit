@@ -1761,6 +1761,142 @@ fn git_operation_state(repo_path: String) -> Result<GitOperationState, String> {
     })
 }
 
+
+#[tauri::command]
+fn git_merge_abort(repo_path: String) -> Result<String, String> {
+    let state = git_operation_state(repo_path.clone())?;
+
+    if !state.merge_in_progress {
+        return Err("Abort merge blocked: no merge is currently in progress.".into());
+    }
+
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .args(["merge", "--abort"])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if out.status.success() {
+        Ok("Merge aborted. Repository returned to the pre-merge state.".to_string())
+    } else {
+        Err(command_error("git merge --abort", &out))
+    }
+}
+
+fn resolve_gitignore_conflict_text(input: &str) -> Result<String, String> {
+    let mut output: Vec<String> = Vec::new();
+    let mut ours: Vec<String> = Vec::new();
+    let mut theirs: Vec<String> = Vec::new();
+    let mut mode = "normal";
+    let mut saw_conflict = false;
+
+    for line in input.lines() {
+        if line.starts_with("<<<<<<< ") {
+            if mode != "normal" {
+                return Err("Nested conflict markers are not supported.".into());
+            }
+            saw_conflict = true;
+            mode = "ours";
+            ours.clear();
+            theirs.clear();
+            continue;
+        }
+
+        if line == "=======" && mode == "ours" {
+            mode = "theirs";
+            continue;
+        }
+
+        if line.starts_with(">>>>>>> ") && mode == "theirs" {
+            let mut merged: Vec<String> = Vec::new();
+
+            for candidate in ours.iter().chain(theirs.iter()) {
+                if !merged.iter().any(|existing| existing == candidate) {
+                    merged.push(candidate.clone());
+                }
+            }
+
+            output.extend(merged);
+            mode = "normal";
+            continue;
+        }
+
+        match mode {
+            "normal" => output.push(line.to_string()),
+            "ours" => ours.push(line.to_string()),
+            "theirs" => theirs.push(line.to_string()),
+            _ => return Err("Unknown conflict parser mode.".into()),
+        }
+    }
+
+    if mode != "normal" {
+        return Err("Unclosed conflict marker block.".into());
+    }
+
+    if !saw_conflict {
+        return Err("No conflict markers found in .gitignore.".into());
+    }
+
+    let mut cleaned: Vec<String> = Vec::new();
+
+    for line in output {
+        if line.trim().is_empty() {
+            if cleaned.last().map(|last| last.trim().is_empty()).unwrap_or(false) {
+                continue;
+            }
+        }
+
+        cleaned.push(line);
+    }
+
+    while cleaned.last().map(|line| line.trim().is_empty()).unwrap_or(false) {
+        cleaned.pop();
+    }
+
+    Ok(format!("{}\n", cleaned.join("\n")))
+}
+
+#[tauri::command]
+fn git_resolve_gitignore_keep_both(repo_path: String) -> Result<String, String> {
+    let state = git_operation_state(repo_path.clone())?;
+
+    if !state.merge_in_progress {
+        return Err("Auto-resolve blocked: no merge is currently in progress.".into());
+    }
+
+    if !state.conflicted_files.iter().any(|file| file == ".gitignore") {
+        return Err("Auto-resolve blocked: .gitignore is not currently conflicted.".into());
+    }
+
+    if state.conflicted_files.len() != 1 {
+        return Err("Auto-resolve blocked: more than one conflicted file exists. Resolve other conflicts manually first.".into());
+    }
+
+    let path = std::path::PathBuf::from(&repo_path).join(".gitignore");
+    let original = std::fs::read_to_string(&path)
+        .map_err(|e| format!("Could not read .gitignore: {}", e))?;
+
+    let resolved = resolve_gitignore_conflict_text(&original)?;
+
+    std::fs::write(&path, resolved)
+        .map_err(|e| format!("Could not write resolved .gitignore: {}", e))?;
+
+    let add_out = Command::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .args(["add", "--", ".gitignore"])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !add_out.status.success() {
+        return Err(command_error("git add -- .gitignore", &add_out));
+    }
+
+    Ok("Resolved .gitignore by keeping both sides and removing duplicate lines. The file is prepared for the merge commit.".to_string())
+}
+
+
 #[tauri::command]
 fn git_fetch_remote(repo_path: String) -> Result<String, String> {
     let upstream = current_upstream(&repo_path)?;
@@ -4046,6 +4182,8 @@ pub fn run() {
             git_push_execute,
             git_pull_rebase_execute,
             git_rebase_abort,
+            git_merge_abort,
+            git_resolve_gitignore_keep_both,
             git_status,
             git_commit_preflight,
             git_stage,

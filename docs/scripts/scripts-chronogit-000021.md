@@ -4,8 +4,8 @@ Date: 2026-05-07
 Author: Matz
 Type: scripts
 Subsystem: branch-workflow
-Updated: 2026-05-08
-Revision: 2
+Updated: 2026-05-16
+Revision: 3
 
 ---
 
@@ -25,13 +25,19 @@ Revision: 2
 @semantic:self-repository-guard
 @semantic:educational-ui
 @semantic:deterministic-projection
+@semantic:contextual-help
+@semantic:workflow-navigation
+@semantic:merge-risk-explanation
+@semantic:merge-preview
+@semantic:merge-readiness
+@semantic:branch-relationship-inspector
 @state:active
 
 # BranchPanel.tsx
 
 **Date:** 2026-05-07
-**Summary:** Branch workflow panel for ChronoGit. Renders local and remote branch timelines, branch state summaries, branch creation controls, guarded branch-switch requests, detached HEAD visibility, self-repository switching warnings, and deterministic branch topology projection from backend branch graph data.
-**Keywords:** branch panel, git branches, branch overview, branch graph, branch topology, branch switching, branch creation, detached head, branch timeline
+**Summary:** Branch workflow panel for ChronoGit. Renders local and remote branch timelines, branch state summaries, guarded branch creation/switch requests, deterministic branch topology projection, branch relationship inspection, merge readiness previews, guided merge blocker navigation, structured merge-risk LLM explanations, and merge execution controls.
+**Keywords:** branch panel, git branches, branch overview, branch graph, branch topology, branch switching, branch creation, branch relationship, merge preview, merge readiness, merge risk, local LLM, detached head, branch timeline
 **Tags:** scripts, frontend, react, branches, git, branch-graph, branch-topology, timeline, workspace-panel
 
 Branch timeline inspection, branch graph projection, and branch workflow panel for ChronoGit.
@@ -1200,6 +1206,647 @@ This revision documents newly present branch topology behavior:
 No undocumented behavior has been inferred beyond directly visible source logic.
 
 ---
+
+
+---
+
+# 2026-05-16 Update: Branch Relationship, Merge Readiness, and Merge-Risk Explanation
+
+This update documents the expanded BranchPanel behavior visible in the inspected source revision.
+
+The panel now acts as a branch decision-support surface, not only a branch list and topology renderer.
+
+New responsibilities include:
+
+- branch relationship inspection
+- semantic relationship verdict rendering
+- shared touched path surfacing
+- collapsible relationship evidence groups
+- beginner-oriented relationship interpretation
+- merge direction preview
+- merge readiness explanation
+- merge blocker explanation
+- deterministic navigation to supporting panels
+- structured merge-risk LLM explanation dispatch
+- merge execution confirmation controls
+- contextual help hints for confusing branch concepts
+
+---
+
+## New Imported Components
+
+The panel now imports:
+
+    ChronoDropdown
+    HelpHint
+
+from:
+
+    ../components/ChronoDropdown
+    ../components/HelpHint
+
+`ChronoDropdown` provides custom searchable branch selection without relying on native OS select widgets.
+
+`HelpHint` provides inline beginner-facing explanations beside complex branch relationship and shared-path concepts.
+
+---
+
+## New Imported Git Action Wrappers
+
+The panel now imports:
+
+    compareCommits
+    executeBranchMerge
+    explainMergeRiskWithOllama
+    inspectBranchRelationship
+    previewBranchMerge
+
+from:
+
+    ../core/gitActions
+
+These wrappers move backend invocation out of the component body while allowing BranchPanel to orchestrate branch/merge workflows.
+
+---
+
+## Expanded Runtime Type Dependencies
+
+The panel now consumes:
+
+- `BranchMergePreview`
+- `BranchRelationshipPreview`
+- `LlmLogEntry`
+
+in addition to the previous branch overview and graph types.
+
+This reflects the panel’s move from branch display to branch/merge cognition.
+
+---
+
+## Expanded Props
+
+New props include:
+
+- `openOrAddPanel`
+- `llmModel`
+- `appendLlmEntry`
+
+---
+
+## openOrAddPanel
+
+Type:
+
+    (type: PanelType) => void
+
+Purpose:
+
+Allows BranchPanel to route the user to the correct supporting panel without directly owning workspace layout.
+
+Used for:
+
+- opening Change Lists when local work blocks a merge
+- opening Commit Preflight when current work should be committed
+- opening Time Machine for manual inspection
+- opening LLM Log after merge-risk explanation completion
+
+This keeps BranchPanel as an intent source while App.tsx remains the workspace orchestration owner.
+
+---
+
+## llmModel
+
+Type:
+
+    string
+
+Purpose:
+
+Identifies the selected local LLM model used for merge-risk explanation.
+
+If no model is selected, the merge-risk explanation button is disabled.
+
+---
+
+## appendLlmEntry
+
+Type:
+
+    (entry: Omit<LlmLogEntry, "id" | "timestamp">) => void
+
+Purpose:
+
+Allows BranchPanel to write merge-risk explanation results into the central LLM log.
+
+The panel does not render the LLM answer inline.
+
+---
+
+# BranchSubpanel Component
+
+## Purpose
+
+`BranchSubpanel` provides collapsible sections inside the BranchPanel.
+
+It receives:
+
+- `title`
+- `subtitle`
+- `defaultOpen`
+- `important`
+- `children`
+
+This reduces monolithic vertical UI pressure and lets important sections remain visible while lower-priority evidence can collapse.
+
+---
+
+## Important Modifier
+
+When `important` is true, the root receives:
+
+    branch-subpanel--important
+
+Used for high-value branch relationship and merge sections.
+
+---
+
+# Relationship Inspector
+
+The panel now contains a Timeline Relationship Inspector.
+
+Purpose:
+
+Compare two branch timelines before dangerous branch operations.
+
+It uses two `ChronoDropdown` selectors:
+
+- left branch
+- right branch
+
+and invokes:
+
+    inspectBranchRelationship(repoPath, left, right)
+
+The operation is preview-only.
+
+It does not:
+
+- switch branches
+- merge branches
+- rebase
+- mutate files
+
+---
+
+## Relationship Preview State
+
+State includes:
+
+- `leftBranch`
+- `rightBranch`
+- `relationshipBusy`
+- `relationshipError`
+- `relationship`
+
+---
+
+## requestRelationshipPreview
+
+Purpose:
+
+Loads deterministic relationship truth from the backend.
+
+Behavior:
+
+1. trims left and right branch names
+2. returns early when either side is empty or both are equal
+3. sets busy and clears error
+4. invokes `inspectBranchRelationship`
+5. stores `BranchRelationshipPreview`
+6. clears result and stores error on failure
+7. resets busy in finally
+
+---
+
+# Relationship Verdict Helpers
+
+New relationship helpers include:
+
+- `relationshipVerdictTitle`
+- `relationshipMetricExplanation`
+- `relationshipBeginnerSummary`
+- `relationshipInterpretation`
+
+These convert backend relationship truth into beginner-readable operational meaning.
+
+---
+
+## relationshipVerdictTitle
+
+Maps classifications such as:
+
+- `IDENTICAL`
+- `FAST_FORWARD_LEFT`
+- `FAST_FORWARD_RIGHT`
+- `DIVERGED_CLEAN_PATHS`
+- `DIVERGED_SHARED_PATHS`
+- `HIGH_RISK`
+
+into readable verdict headings.
+
+---
+
+## relationshipMetricExplanation
+
+Explains relationship metrics:
+
+- left-only commits
+- right-only commits
+- shared touched paths
+- working changes
+
+This supports both native `title` hints and visible metric card text.
+
+---
+
+## relationshipBeginnerSummary
+
+Produces practical beginner explanations of the relationship result.
+
+Examples include:
+
+- branches already aligned
+- fast-forward case
+- shared touched files requiring review
+- both branches evolved separately
+
+---
+
+## relationshipInterpretation
+
+Produces recommended operational interpretation.
+
+The key safety rule is:
+
+    shared touched paths do not guarantee conflict, but they identify the main collision surface.
+
+---
+
+# Relationship Evidence Groups
+
+`RelationshipEvidenceGroup` renders collapsible file evidence lists using `BranchSubpanel`.
+
+Evidence groups include:
+
+- shared touched files
+- left-only files
+- right-only files
+
+Shared touched files default open when present and can be marked important.
+
+---
+
+# Merge Preview Workflow
+
+The panel now includes a dedicated merge-into-current-timeline workflow.
+
+It clearly establishes direction:
+
+    current branch ← incoming branch
+
+This is important because Git users often confuse source and destination branch direction.
+
+---
+
+## Merge Preview State
+
+State includes:
+
+- `incomingMergeBranch`
+- `mergePreviewBusy`
+- `mergeExecuteBusy`
+- `mergeExplainBusy`
+- `mergeError`
+- `mergeConfirmation`
+- `mergePreview`
+
+---
+
+## requestMergePreview
+
+Purpose:
+
+Loads merge preview truth for the selected incoming branch.
+
+Behavior:
+
+1. trims selected incoming branch
+2. returns early if empty
+3. sets preview busy
+4. clears merge error and confirmation text
+5. invokes `previewBranchMerge(repoPath, target)`
+6. stores `BranchMergePreview`
+7. clears preview and stores error on failure
+8. resets busy in finally
+
+---
+
+# Merge Intent Helpers
+
+Merge helpers include:
+
+- `describeMergeIntent`
+- `mergeTopologyRisk`
+- `mergeBlockedByLocalWork`
+- `mergeReadinessTitle`
+- `mergeReadinessExplanation`
+
+---
+
+## describeMergeIntent
+
+Maps merge mode into plain-language intent.
+
+Modes handled include:
+
+- `FAST_FORWARD`
+- `NORMAL_MERGE`
+- `RISKY_MERGE`
+- already-contained cases
+
+The helper explains what the user is about to do before execution is possible.
+
+---
+
+## mergeTopologyRisk
+
+Maps preview mode into visible risk level.
+
+Rules:
+
+- `FAST_FORWARD` → LOW
+- `NORMAL_MERGE` → MEDIUM
+- `RISKY_MERGE` → HIGH
+- fallback to backend risk level
+
+---
+
+## mergeBlockedByLocalWork
+
+Detects whether blockers include working-tree local work.
+
+This supports the distinction between:
+
+- topology/merge risk
+- local workspace readiness
+
+---
+
+## mergeReadinessTitle
+
+Provides readable readiness headings:
+
+- `You still have unsaved local work`
+- `ChronoGit blocked this merge`
+- `Ready to merge`
+
+---
+
+## mergeReadinessExplanation
+
+Explains why a merge is blocked or ready.
+
+When local work blocks merging, it tells the user to commit, discard, or set work aside before merging.
+
+---
+
+# Merge Blocker Navigation
+
+When a merge is blocked by local work, the panel displays recommended next steps:
+
+- Review current local changes
+- Commit work to keep
+- Discard only unwanted changes
+- Stash unavailable
+
+Buttons route to deterministic panels:
+
+- Change Lists
+- Commit Preflight
+
+The stash option is disabled because stash support is not implemented in this panel.
+
+This avoids fake affordances.
+
+---
+
+# Shared Files Review
+
+When shared touched files exist, the panel displays a review section.
+
+It tells the user:
+
+    Both timelines changed some of the same files.
+    This does not always mean a conflict.
+    It is worth inspecting before merge.
+
+Actions include:
+
+- ask selected local LLM to explain merge risk
+- open Time Machine for manual inspection
+
+---
+
+# Structured Merge-Risk LLM Explanation
+
+## explainMergeRisk
+
+Purpose:
+
+Generates a structured merge-risk explanation and writes it to the LLM log.
+
+Behavior:
+
+1. requires existing `mergePreview`
+2. requires selected `llmModel`
+3. sets merge explanation busy
+4. clears merge error
+5. calls `compareCommits` for current branch versus target branch
+6. builds a structured merge preview text block
+7. calls `explainMergeRiskWithOllama`
+8. appends result to LLM log
+9. opens or adds the LLM Log panel
+10. stores error on failure
+11. resets busy in finally
+
+---
+
+## Structured Preview Design
+
+The merge-risk LLM request intentionally avoids raw code diff text.
+
+It sends:
+
+- current branch
+- incoming branch
+- merge mode
+- ChronoGit risk label
+- changed file count
+- insertion count
+- deletion count
+- shared touched file count
+- shared touched file list
+- changed file list
+
+This prevents the LLM from drifting into project-specific implementation advice when the task is merge-risk explanation.
+
+---
+
+## LLM Boundary
+
+BranchPanel does not treat LLM output as Git truth.
+
+The LLM explanation is advisory and is routed to the LLM Log.
+
+Git preview data remains authoritative.
+
+---
+
+# Merge Execution Workflow
+
+## requestMergeExecute
+
+Purpose:
+
+Executes the previewed merge only after required confirmation text is entered.
+
+Behavior:
+
+1. returns if no merge preview exists
+2. sets merge execute busy
+3. clears merge error
+4. invokes `executeBranchMerge`
+5. clears merge preview and relationship result on success
+6. clears confirmation input
+7. refreshes branch overview
+8. stores error on failure
+9. resets busy in finally
+
+---
+
+## Confirmation Gate
+
+When `mergePreview.allowed` is true, the panel renders a confirmation section.
+
+The user must type:
+
+    merge
+
+or:
+
+    override
+
+depending on backend-provided `required_confirmation`.
+
+Execution button remains disabled until the typed text matches exactly.
+
+High-risk merges receive danger styling.
+
+---
+
+# HelpHint Integration
+
+The panel uses `HelpHint` for contextual explanations including:
+
+- what a branch relationship means
+- what shared touched paths mean
+- why ChronoGit explains relationship state
+
+These hints keep important information visible without expanding the entire panel.
+
+---
+
+# ChronoDropdown Integration
+
+The panel uses `ChronoDropdown` for:
+
+- left branch selection
+- right branch selection
+- incoming merge branch selection
+
+This avoids native OS dropdown behavior and supports screenshot-friendly custom UI.
+
+---
+
+# Updated Mutation Boundary
+
+BranchPanel still does not directly run Git commands.
+
+It delegates through frontend action wrappers and parent callbacks.
+
+However, it now orchestrates higher-risk branch workflows through typed wrappers:
+
+- relationship preview
+- merge preview
+- merge execution
+- comparison loading for explanation
+- merge-risk LLM explanation dispatch
+
+Actual Git execution remains in backend command code.
+
+---
+
+# Updated Safety Systems
+
+New safety surfaces include:
+
+- collapsible relationship/merge subpanels
+- relationship verdict hierarchy
+- shared touched path warnings
+- local-work blocker interpretation
+- deterministic navigation to supporting panels
+- disabled unimplemented stash option
+- merge direction explanation
+- confirmation text gate
+- merge-risk LLM explanation button
+- manual Time Machine inspection bridge
+
+---
+
+# Updated Known Gaps
+
+Known gaps after this update:
+
+- no inline conflict resolver in BranchPanel
+- no automatic same-line conflict prediction
+- no direct merge-tree simulation view
+- no branch relationship result persistence
+- no automatic Time Machine comparison preloading
+- no stash workflow despite disabled guidance
+- no keyboard navigation for relationship selection
+- no branch deletion/rename workflow
+- no upstream branch creation from remote refs
+
+---
+
+# Verification Notes for 2026-05-16 Update
+
+This update section is based on full-file inspection of:
+
+- `src/panels/BranchPanel.tsx`
+
+It documents directly visible behavior in the inspected source:
+
+- `ChronoDropdown` usage
+- `HelpHint` usage
+- branch relationship preview
+- merge preview
+- merge execution
+- structured merge-risk LLM explanation
+- merge blocker navigation
+- collapsible branch subpanels
+
+No undocumented behavior has been inferred beyond directly visible source logic.
 
 # Status
 

@@ -4,8 +4,8 @@ Date: 2026-05-04
 Author: Matz
 Type: scripts
 Subsystem: workspace-ui
-Updated: 2026-05-08
-Revision: 7
+Updated: 2026-05-16
+Revision: 8
 
 ---
 
@@ -28,6 +28,9 @@ Revision: 7
 @semantic:remote-preview-ui
 @semantic:remote-safety-gate
 @semantic:operation-state-ui
+@semantic:merge-conflict-recovery
+@semantic:gitignore-auto-resolution
+@semantic:panel-navigation-routing
 @semantic:auto-refresh
 @semantic:system-log
 @semantic:llm-log
@@ -40,7 +43,7 @@ Revision: 7
 # App.tsx
 
 **Date:** 2026-05-04  
-**Summary:** React root orchestration surface for ChronoGit. App.tsx owns top-level workspace state, repository selection, panel layout, auto-refresh, confirmation routing, branch overview/graph/switch requests, commit preflight state, remote preview execution flow, persistent system/LLM logs, local LLM streaming, and delegation to extracted panel/component modules.  
+**Summary:** React root orchestration surface for ChronoGit. App.tsx owns top-level workspace state, repository selection, panel layout, auto-refresh, confirmation routing, branch overview/graph/switch requests, commit preflight state, remote preview execution flow, merge conflict recovery orchestration, deterministic panel navigation routing, persistent system/LLM logs, local LLM streaming, and delegation to extracted panel/component modules.  
 **Keywords:** chronogit app, react root, workspace panels, branch panel, branch graph, branch topology, git status, remote preview, commit preflight, persistent logs, local llm, tauri invoke  
 **Tags:** scripts, ui, git, workspace-ui, tauri, panels, branch-workflow, branch-graph, branch-topology, logs, llm
 
@@ -995,6 +998,297 @@ The document intentionally distinguishes:
 Behavior not visible in App.tsx is not treated as proven here.
 
 ---
+
+
+---
+
+# 2026-05-16 Update: Merge Conflict Recovery and Panel Navigation Routing
+
+This update documents the App.tsx behavior added around merge recovery, `.gitignore` conflict handling, branch workflow plumbing, and panel navigation support.
+
+The root app now participates directly in merge recovery orchestration while still delegating detailed branch cognition to `BranchPanel.tsx`.
+
+---
+
+# Expanded Git Action Surface
+
+File action signatures now include:
+
+    git_unstage_prefix
+
+This allows App.tsx to pass grouped staged-folder recovery requests from `ChangeListsPanel.tsx` into the runtime Git action layer.
+
+Supported file actions visible in App.tsx now include:
+
+- `git_stage`
+- `git_unstage`
+- `git_unstage_prefix`
+- `git_restore`
+- `git_remove_untracked`
+- `git_ignore_path`
+
+---
+
+# openOrAddPanel
+
+## Purpose
+
+`openOrAddPanel(type)` ensures that a supporting panel exists in the active workspace tab.
+
+Behavior:
+
+- if a panel of the requested type already exists in the active tab, the tab is left unchanged
+- if not, a new panel is created through `makePanel`
+
+This provides deterministic navigation support for panel-driven workflows.
+
+---
+
+## Current Use
+
+The function is passed to:
+
+    BranchPanel
+
+where it supports merge-readiness recommendations such as opening:
+
+- Change Lists
+- Commit Preflight
+- Time Machine
+- LLM Log
+
+This keeps BranchPanel from owning workspace layout while still allowing it to route users toward the correct operational surface.
+
+---
+
+# BranchPanel Prop Expansion
+
+The `branches` panel now receives additional props:
+
+- `openOrAddPanel`
+- `llmModel`
+- `appendLlmEntry`
+
+These allow BranchPanel to:
+
+- route users to supporting panels
+- request merge-risk explanation using the currently selected model
+- append completed merge-risk explanations to the central LLM log
+
+App.tsx remains the owner of workspace state and LLM log state.
+
+---
+
+# Merge Abort Orchestration
+
+## abortMerge
+
+App.tsx now defines:
+
+    abortMerge()
+
+Purpose:
+
+Allows the interrupted-operation banner to abort an in-progress merge.
+
+Backend command:
+
+    git_merge_abort
+
+Behavior:
+
+1. sets `remoteBusy` to `merge-abort`
+2. invokes backend merge abort
+3. updates message and last action
+4. appends system-log action
+5. refreshes Git truth
+6. records errors if abort fails
+7. clears busy state in finally
+
+This is a root-level recovery workflow because interrupted Git operation state is rendered by App.tsx.
+
+---
+
+# .gitignore Conflict Auto-Resolution
+
+## resolveGitignoreKeepBoth
+
+App.tsx now defines:
+
+    resolveGitignoreKeepBoth()
+
+Purpose:
+
+Allows a narrow deterministic auto-resolution for simple `.gitignore` merge conflicts.
+
+Backend command:
+
+    git_resolve_gitignore_keep_both
+
+Behavior:
+
+1. sets `remoteBusy` to `resolve-gitignore`
+2. invokes backend `.gitignore` resolver
+3. updates message and last action
+4. appends system-log action
+5. refreshes Git truth
+6. records errors if resolution fails
+7. clears busy state in finally
+
+---
+
+# Operation-State Banner Expansion
+
+The interrupted-operation banner now supports merge conflict recovery.
+
+It still displays:
+
+- operation label
+- backend warning text
+- conflicted files
+
+It now also renders additional controls when merge state is active.
+
+---
+
+## Simple .gitignore Conflict Card
+
+Condition:
+
+    operationState?.merge_in_progress
+    && operationState.conflicted_files.length === 1
+    && operationState.conflicted_files[0] === ".gitignore"
+
+When true, App.tsx renders:
+
+    Simple .gitignore conflict detected
+
+and explains that ChronoGit can:
+
+- keep both sides
+- remove duplicate lines
+- prepare `.gitignore` for the merge commit
+
+The button calls:
+
+    resolveGitignoreKeepBoth()
+
+This is intentionally narrow and deterministic.
+
+---
+
+## Abort Merge Button
+
+When:
+
+    operationState?.merge_in_progress
+
+App.tsx renders an Abort merge button.
+
+Button behavior:
+
+- disabled while `remoteBusy === "merge-abort"`
+- calls `abortMerge`
+- uses beginner/pro terminology through `ui`
+
+This separates merge recovery from rebase recovery.
+
+---
+
+## Abort Rebase Button
+
+Rebase abort remains available when:
+
+    operationState?.rebase_in_progress
+
+It calls:
+
+    abortRebase
+
+---
+
+# Merge Recovery Boundary
+
+App.tsx does not parse conflict markers.
+
+App.tsx does not edit `.gitignore`.
+
+App.tsx does not decide whether the backend resolver is safe.
+
+Instead:
+
+- App.tsx detects frontend-visible operation state
+- App.tsx renders a narrow recovery affordance
+- backend command performs validated conflict resolution
+- App.tsx refreshes Git truth afterward
+
+This preserves the backend as the mutation/truth boundary.
+
+---
+
+# LLM Log Routing for Branch Workflows
+
+BranchPanel can now append merge-risk explanations through:
+
+    appendLlmEntry
+
+and can request the LLM log panel through:
+
+    openOrAddPanel("llm-log")
+
+App.tsx owns both:
+
+- LLM log state
+- workspace panel layout
+
+This keeps merge-risk explanation output centralized in the existing LLM log instead of creating one-off BranchPanel-specific explanation state.
+
+---
+
+# Updated Safety Systems
+
+New safety surfaces include:
+
+- merge abort button during merge state
+- narrow `.gitignore` auto-resolution card
+- conflict-file display in operation banner
+- deterministic supporting-panel navigation
+- grouped staged-prefix recovery routing
+- BranchPanel-to-App LLM log routing
+
+---
+
+# Updated Known Gaps
+
+Known gaps after this update:
+
+- `.gitignore` auto-resolution is wired directly through `invoke` instead of a `gitActions.ts` wrapper.
+- `git_merge_abort` is also invoked directly from App.tsx instead of through `gitActions.ts`.
+- Operation-state wording still depends partly on backend warning strings.
+- Auto-resolution currently supports only the `.gitignore` keep-both case.
+- The operation-state banner does not yet provide generic conflict-file opening or manual editor routing.
+- `openOrAddPanel` only guarantees the panel exists in the current tab; it does not focus, scroll, flash, or rearrange panels.
+- Merge conflict recovery UI is root-level rather than extracted into a dedicated panel.
+
+---
+
+# Verification Notes for 2026-05-16 Update
+
+This update is based on full-file inspection of:
+
+- `src/App.tsx`
+
+The update specifically documents:
+
+- `openOrAddPanel`
+- `git_unstage_prefix` routing
+- expanded BranchPanel props
+- merge abort orchestration
+- `.gitignore` conflict auto-resolution orchestration
+- operation-state banner merge recovery controls
+- LLM log routing from BranchPanel workflows
+
+No undocumented behavior has been inferred beyond directly visible source logic.
 
 ## Status
 
