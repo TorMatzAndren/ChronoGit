@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { buildBranchTopology } from "../core/branchTopology";
-import type { BranchGraph, BranchInfo, BranchOverview } from "../core/chronogitRuntimeTypes";
+import { inspectBranchRelationship } from "../core/gitActions";
+import type { BranchGraph, BranchInfo, BranchOverview, BranchRelationshipPreview } from "../core/chronogitRuntimeTypes";
 
 type Props = {
   beginnerMode: boolean;
@@ -189,6 +190,45 @@ function BranchRow({
   );
 }
 
+
+function BranchSubpanel({
+  title,
+  subtitle,
+  defaultOpen,
+  important,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  defaultOpen: boolean;
+  important?: boolean;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+
+  return (
+    <section className={important ? "branch-subpanel branch-subpanel--important" : "branch-subpanel"}>
+      <button
+        type="button"
+        className="branch-subpanel__header"
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span>
+          <strong>{title}</strong>
+          {subtitle ? <em>{subtitle}</em> : null}
+        </span>
+        <b>{open ? "Collapse" : "Expand"}</b>
+      </button>
+
+      {open ? (
+        <div className="branch-subpanel__body">
+          {children}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 export function BranchPanel({
   beginnerMode,
   repoPath,
@@ -201,6 +241,16 @@ export function BranchPanel({
 }: Props) {
   const [branchName, setBranchName] = useState("");
   const [creating, setCreating] = useState(false);
+  const [leftBranch, setLeftBranch] = useState("");
+  const [rightBranch, setRightBranch] = useState("");
+  const [relationshipBusy, setRelationshipBusy] = useState(false);
+  const [relationshipError, setRelationshipError] = useState("");
+  const [relationship, setRelationship] = useState<BranchRelationshipPreview | null>(null);
+
+  const inspectableBranches = branchOverview
+    ? [...branchOverview.local_branches, ...branchOverview.remote_branches]
+        .filter((branch) => !branch.is_detached)
+    : [];
 
   async function requestCreateBranch() {
     const name = branchName.trim();
@@ -212,6 +262,24 @@ export function BranchPanel({
       setBranchName("");
     } finally {
       setCreating(false);
+    }
+  }
+
+  async function requestRelationshipPreview() {
+    const left = leftBranch.trim();
+    const right = rightBranch.trim();
+
+    if (!left || !right || left === right) return;
+
+    try {
+      setRelationshipBusy(true);
+      setRelationshipError("");
+      setRelationship(await inspectBranchRelationship(repoPath, left, right));
+    } catch (err) {
+      setRelationship(null);
+      setRelationshipError(String(err));
+    } finally {
+      setRelationshipBusy(false);
     }
   }
 
@@ -242,72 +310,201 @@ export function BranchPanel({
         </section>
       ) : null}
 
-      <section className="branch-create-box">
-        <div>
-          <strong>{ui(beginnerMode, "Create new timeline branch", "git branch <name>")}</strong>
-          <span>
-            {ui(
-              beginnerMode,
-              "Creates a branch pointer at the current snapshot. It does not switch branches or change files.",
-              "Runs git branch <name>. No checkout, no worktree mutation.",
-            )}
-          </span>
-        </div>
-        <input
-          value={branchName}
-          onChange={(event) => setBranchName(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") void requestCreateBranch();
-          }}
-          placeholder="branch-name"
-        />
-        <button disabled={!branchName.trim() || creating} onClick={() => { void requestCreateBranch(); }}>
-          {creating ? "Creating..." : ui(beginnerMode, "Create branch", "git branch")}
-        </button>
-      </section>
+      <BranchSubpanel
+        title={ui(beginnerMode, "Create new timeline branch", "Create branch")}
+        subtitle={ui(beginnerMode, "Create a branch pointer without switching timelines.", "git branch <name> · no checkout")}
+        defaultOpen={false}
+      >
+        <section className="branch-create-box">
+          <div>
+            <strong>{ui(beginnerMode, "Create new timeline branch", "git branch <name>")}</strong>
+            <span>
+              {ui(
+                beginnerMode,
+                "Creates a branch pointer at the current snapshot. It does not switch branches or change files.",
+                "Runs git branch <name>. No checkout, no worktree mutation.",
+              )}
+            </span>
+          </div>
+          <input
+            value={branchName}
+            onChange={(event) => setBranchName(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") void requestCreateBranch();
+            }}
+            placeholder="branch-name"
+          />
+          <button disabled={!branchName.trim() || creating} onClick={() => { void requestCreateBranch(); }}>
+            {creating ? "Creating..." : ui(beginnerMode, "Create branch", "git branch")}
+          </button>
+        </section>
+      </BranchSubpanel>
+
+
+      <BranchSubpanel
+        title={ui(beginnerMode, "Timeline Relationship Inspector", "Branch relationship preview")}
+        subtitle={ui(beginnerMode, "Understand two timelines before merge/rebase/switch decisions.", "merge-base · rev-list · changed path overlap")}
+        defaultOpen={true}
+        important
+      >
+        <section className="branch-relationship-box">
+          <div>
+            <strong>{ui(beginnerMode, "Inspect timeline relationship", "branch relationship preview")}</strong>
+            <span>
+                {ui(
+                  beginnerMode,
+                  "Compare two branch timelines before doing anything dangerous. This does not switch, merge, or modify files.",
+                  "Runs deterministic branch/ref inspection only. No checkout, merge, rebase, or working-tree mutation.",
+                )}
+            </span>
+          </div>
+
+          <select value={leftBranch} onChange={(event) => setLeftBranch(event.target.value)}>
+            <option value="">Left branch</option>
+            {inspectableBranches.map((branch) => (
+                <option key={`left-${branch.full_name}`} value={branch.name}>
+                  {branch.name}
+                </option>
+            ))}
+          </select>
+
+          <select value={rightBranch} onChange={(event) => setRightBranch(event.target.value)}>
+            <option value="">Right branch</option>
+            {inspectableBranches.map((branch) => (
+                <option key={`right-${branch.full_name}`} value={branch.name}>
+                  {branch.name}
+                </option>
+            ))}
+          </select>
+
+          <button
+            disabled={!leftBranch || !rightBranch || leftBranch === rightBranch || relationshipBusy}
+            onClick={() => { void requestRelationshipPreview(); }}
+          >
+            {relationshipBusy ? "Inspecting..." : ui(beginnerMode, "Inspect relationship", "git merge-base / rev-list")}
+          </button>
+        </section>
+
+        {relationshipError ? (
+          <section className="branch-callout branch-callout--warning">
+            <strong>Relationship preview failed</strong>
+            <span>{relationshipError}</span>
+          </section>
+        ) : null}
+
+        {relationship ? (
+          <section className="branch-relationship-result">
+            <div className="branch-relationship-result__header">
+                <div>
+                  <strong>{relationship.classification}</strong>
+                  <span>{relationship.left_branch} ↔ {relationship.right_branch}</span>
+                </div>
+                <em className={`risk-pill risk-pill--${relationship.risk_level.toLowerCase()}`}>
+                  {relationship.risk_level}
+                </em>
+            </div>
+
+            <div className="branch-relationship-grid">
+                <div><strong>{relationship.left_ahead}</strong><span>left-only commits</span></div>
+                <div><strong>{relationship.right_ahead}</strong><span>right-only commits</span></div>
+                <div><strong>{relationship.shared_touched_files.length}</strong><span>shared touched paths</span></div>
+                <div><strong>{relationship.working_changes}</strong><span>working changes</span></div>
+            </div>
+
+            <p>{relationship.summary}</p>
+            <p>{relationship.warning}</p>
+
+            <div className="branch-relationship-meta">
+                <span><strong>Merge base</strong><code>{relationship.merge_base.slice(0, 12)}</code></span>
+                <span><strong>Left HEAD</strong><code>{relationship.left_head.slice(0, 12)}</code></span>
+                <span><strong>Right HEAD</strong><code>{relationship.right_head.slice(0, 12)}</code></span>
+            </div>
+
+            <div className="branch-relationship-columns">
+                <div>
+                  <strong>Left-only files ({relationship.left_only_files.length})</strong>
+                  {relationship.left_only_files.slice(0, 12).map((file) => <code key={`left-file-${file}`}>{file}</code>)}
+                  {relationship.left_only_files.length > 12 ? <span>+{relationship.left_only_files.length - 12} more</span> : null}
+                </div>
+                <div>
+                  <strong>Right-only files ({relationship.right_only_files.length})</strong>
+                  {relationship.right_only_files.slice(0, 12).map((file) => <code key={`right-file-${file}`}>{file}</code>)}
+                  {relationship.right_only_files.length > 12 ? <span>+{relationship.right_only_files.length - 12} more</span> : null}
+                </div>
+                <div>
+                  <strong>Shared touched files ({relationship.shared_touched_files.length})</strong>
+                  {relationship.shared_touched_files.slice(0, 12).map((file) => <code key={`shared-file-${file}`}>{file}</code>)}
+                  {relationship.shared_touched_files.length > 12 ? <span>+{relationship.shared_touched_files.length - 12} more</span> : null}
+                </div>
+            </div>
+          </section>
+        ) : null}
+      </BranchSubpanel>
 
       {branchOverview ? (
         <>
-          <section className={branchOverview.detached_head ? "branch-callout branch-callout--warning" : "branch-callout"}>
-            <strong>{branchOverview.current_branch}</strong>
-            <span>
-              {branchOverview.detached_head
-                ? "Detached HEAD: you are looking at a commit directly, not a named branch."
-                : "Current branch / active timeline pointer."}
-            </span>
-          </section>
+          <BranchSubpanel
+            title={ui(beginnerMode, "Current timeline", "HEAD / current branch")}
+            subtitle={branchOverview.detached_head ? "Detached HEAD" : "Active branch pointer"}
+            defaultOpen={true}
+          >
+            <section className={branchOverview.detached_head ? "branch-callout branch-callout--warning" : "branch-callout"}>
+              <strong>{branchOverview.current_branch}</strong>
+              <span>
+                {branchOverview.detached_head
+                  ? "Detached HEAD: you are looking at a commit directly, not a named branch."
+                  : "Current branch / active timeline pointer."}
+              </span>
+            </section>
+          </BranchSubpanel>
 
-          <section className="branch-panel__section">
-            <h4>Local branches ({branchOverview.local_branches.length})</h4>
-            {branchOverview.local_branches.length
-              ? branchOverview.local_branches.map((branch) => (
-                  <BranchRow
-                    key={branch.full_name}
-                    branch={branch}
-                    requestSwitchBranch={requestSwitchBranch}
-                    beginnerMode={beginnerMode}
-                    ui={ui}
-                  />
-                ))
-              : <p>No local branches detected.</p>}
-          </section>
+          <BranchSubpanel
+            title={`Local branches (${branchOverview.local_branches.length})`}
+            subtitle="Writable local timeline pointers."
+            defaultOpen={true}
+          >
+            <section className="branch-panel__section">
+              {branchOverview.local_branches.length
+                ? branchOverview.local_branches.map((branch) => (
+                    <BranchRow
+                      key={branch.full_name}
+                      branch={branch}
+                      requestSwitchBranch={requestSwitchBranch}
+                      beginnerMode={beginnerMode}
+                      ui={ui}
+                    />
+                  ))
+                : <p>No local branches detected.</p>}
+            </section>
+          </BranchSubpanel>
 
-          <section className="branch-panel__section">
-            <h4>Remote branches ({branchOverview.remote_branches.length})</h4>
-            {branchOverview.remote_branches.length
-              ? branchOverview.remote_branches.map((branch) => (
-                  <BranchRow
-                    key={branch.full_name}
-                    branch={branch}
-                    requestSwitchBranch={requestSwitchBranch}
-                    beginnerMode={beginnerMode}
-                    ui={ui}
-                  />
-                ))
-              : <p>No remote branches detected.</p>}
-          </section>
+          <BranchSubpanel
+            title={`Remote branches (${branchOverview.remote_branches.length})`}
+            subtitle="Read-only remote tracking references."
+            defaultOpen={false}
+          >
+            <section className="branch-panel__section">
+              {branchOverview.remote_branches.length
+                ? branchOverview.remote_branches.map((branch) => (
+                    <BranchRow
+                      key={branch.full_name}
+                      branch={branch}
+                      requestSwitchBranch={requestSwitchBranch}
+                      beginnerMode={beginnerMode}
+                      ui={ui}
+                    />
+                  ))
+                : <p>No remote branches detected.</p>}
+            </section>
+          </BranchSubpanel>
 
-          <BranchGraphView branchGraph={branchGraph} />
+          <BranchSubpanel
+            title={ui(beginnerMode, "Branch topology", "Branch graph")}
+            subtitle="Visual timeline shape derived from commit parents and refs."
+            defaultOpen={true}
+          >
+            <BranchGraphView branchGraph={branchGraph} />
+          </BranchSubpanel>
         </>
       ) : (
         <p>No branch overview loaded.</p>

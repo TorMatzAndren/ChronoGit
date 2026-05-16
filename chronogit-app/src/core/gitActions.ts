@@ -3,12 +3,29 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   CommitPreflight,
   CommitResult,
+  BranchRelationshipPreview,
   GitRemoteStatus,
   GitStatusResponse,
   RemoteOperationPreview,
   RemotePullResult,
   RemotePushResult,
 } from "./chronogitRuntimeTypes";
+
+
+export async function inspectBranchRelationship(
+  repoPath: string,
+  leftBranch: string,
+  rightBranch: string,
+): Promise<BranchRelationshipPreview> {
+  return invoke<BranchRelationshipPreview>(
+    "git_branch_relationship_preview",
+    {
+      repoPath,
+      leftBranch,
+      rightBranch,
+    },
+  );
+}
 
 export async function executeFileAction(
   repoPath: string,

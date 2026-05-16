@@ -3198,3 +3198,210 @@ code {
   font-style: normal;
   font-size: 0.66rem;
 }
+
+
+/* CHRONOGIT_BRANCH_RELATIONSHIP_PREVIEW_V1 */
+.branch-relationship-box {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(140px, 220px) minmax(140px, 220px) auto;
+  gap: 8px;
+  align-items: center;
+  border: 1px solid rgba(94, 234, 212, 0.2);
+  border-radius: 9px;
+  padding: 7px 9px;
+  background: rgba(15, 23, 42, 0.28);
+}
+
+.branch-relationship-box div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.branch-relationship-box span {
+  font-size: 0.72rem;
+  opacity: 0.72;
+}
+
+.branch-relationship-result {
+  display: grid;
+  gap: 8px;
+  border: 1px solid rgba(94, 234, 212, 0.24);
+  border-radius: 10px;
+  padding: 10px;
+  background:
+    linear-gradient(180deg, rgba(13, 42, 44, 0.62), rgba(5, 18, 21, 0.76));
+}
+
+.branch-relationship-result__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.branch-relationship-result__header div {
+  display: grid;
+  gap: 2px;
+}
+
+.branch-relationship-result__header span,
+.branch-relationship-result p,
+.branch-relationship-meta span,
+.branch-relationship-columns span {
+  color: #9facbc;
+  font-size: 0.72rem;
+}
+
+.branch-relationship-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(90px, 1fr));
+  gap: 6px;
+}
+
+.branch-relationship-grid div {
+  padding: 7px 8px;
+  border: 1px solid rgba(94, 234, 212, 0.16);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.branch-relationship-grid strong {
+  display: block;
+  color: #ffffff;
+  font-size: 1.25rem;
+}
+
+.branch-relationship-grid span {
+  color: #9facbc;
+  font-size: 0.68rem;
+}
+
+.branch-relationship-meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(120px, 1fr));
+  gap: 6px;
+}
+
+.branch-relationship-meta span {
+  display: grid;
+  gap: 3px;
+}
+
+.branch-relationship-meta code {
+  font-size: 0.68rem;
+}
+
+.branch-relationship-columns {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(140px, 1fr));
+  gap: 8px;
+}
+
+.branch-relationship-columns > div {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 5px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 8px;
+  padding: 7px;
+  background: rgba(15, 23, 42, 0.22);
+}
+
+.branch-relationship-columns code {
+  font-size: 0.68rem;
+  padding: 4px 5px;
+}
+
+@media (max-width: 1100px) {
+  .branch-relationship-box,
+  .branch-relationship-grid,
+  .branch-relationship-meta,
+  .branch-relationship-columns {
+    grid-template-columns: 1fr;
+  }
+}
+
+
+/* CHRONOGIT_BRANCH_SUBPANELS_V1 */
+.branch-subpanel {
+  display: grid;
+  gap: 0;
+  border: 1px solid rgba(100, 240, 200, 0.18);
+  border-radius: 11px;
+  overflow: hidden;
+  background: rgba(5, 18, 21, 0.42);
+}
+
+.branch-subpanel--important {
+  border-color: rgba(100, 240, 200, 0.38);
+  box-shadow: 0 0 0 1px rgba(100, 240, 200, 0.05) inset;
+}
+
+.branch-subpanel__header {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  text-align: left;
+  border: 0;
+  border-radius: 0;
+  padding: 8px 10px;
+  background:
+    linear-gradient(90deg, rgba(13, 52, 50, 0.74), rgba(4, 18, 20, 0.86));
+}
+
+.branch-subpanel__header span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.branch-subpanel__header strong {
+  color: #eafff8;
+  font-size: 0.82rem;
+}
+
+.branch-subpanel__header em {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #9facbc;
+  font-size: 0.68rem;
+  font-style: normal;
+}
+
+.branch-subpanel__header b {
+  flex: 0 0 auto;
+  color: #64f0c8;
+  font-size: 0.64rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.branch-subpanel__body {
+  display: grid;
+  gap: 8px;
+  padding: 8px;
+}
+
+.branch-subpanel--important .branch-subpanel__body {
+  background:
+    radial-gradient(circle at top left, rgba(100, 240, 200, 0.08), transparent 18rem),
+    rgba(255, 255, 255, 0.018);
+}
+
+.branch-subpanel .branch-create-box,
+.branch-subpanel .branch-relationship-box,
+.branch-subpanel .branch-relationship-result,
+.branch-subpanel .branch-graph {
+  margin: 0;
+}
+
+.branch-subpanel .branch-panel__section h4 {
+  display: none;
+}
+
