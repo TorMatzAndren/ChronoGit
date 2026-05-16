@@ -241,6 +241,53 @@ function relationshipVerdictTitle(relationship: BranchRelationshipPreview) {
   return relationship.classification.replace(/_/g, " ");
 }
 
+
+function relationshipMetricExplanation(
+  metric: "left" | "right" | "shared" | "working"
+) {
+  if (metric == "left") {
+    return "Commits that only exist on the left branch timeline.";
+  }
+
+  if (metric == "right") {
+    return "Commits that only exist on the right branch timeline.";
+  }
+
+  if (metric == "shared") {
+    return "Files touched by BOTH branches. These are the most likely merge collision surfaces.";
+  }
+
+  return "Uncommitted local file modifications currently detected in the repository.";
+}
+
+function relationshipBeginnerSummary(
+  relationship: BranchRelationshipPreview
+) {
+  if (relationship.classification === "IDENTICAL") {
+    return "Both branches currently point to the exact same history. Nothing would change if you switched between them.";
+  }
+
+  if (
+    relationship.classification === "FAST_FORWARD_LEFT" ||
+    relationship.classification === "FAST_FORWARD_RIGHT"
+  ) {
+    return "One branch is simply ahead of the other. Git can move the older timeline forward without creating a merge commit.";
+  }
+
+  if (relationship.shared_touched_files.length > 0) {
+    return "Both branches modified some of the same files. This increases the chance of merge conflicts and requires careful review.";
+  }
+
+  if (
+    relationship.left_ahead > 0 &&
+    relationship.right_ahead > 0
+  ) {
+    return "Both branches evolved separately with their own commits. Git will probably need a merge commit or rebase strategy.";
+  }
+
+  return "This relationship appears structurally safe, but review the evidence before merging or rebasing.";
+}
+
 function relationshipInterpretation(relationship: BranchRelationshipPreview) {
   if (relationship.shared_touched_files.length > 0) {
     return "Review shared touched paths before any merge/rebase operation. Shared paths do not guarantee a conflict, but they are the primary collision surface.";
@@ -484,13 +531,51 @@ export function BranchPanel({
             </div>
 
             <div className="branch-relationship-grid">
-              <div><strong>{relationship.left_ahead}</strong><span>left-only commits</span></div>
-              <div><strong>{relationship.right_ahead}</strong><span>right-only commits</span></div>
-              <div className={relationship.shared_touched_files.length ? "relationship-metric--warning" : ""}>
-                <strong>{relationship.shared_touched_files.length}</strong><span>shared touched paths</span>
+              <div
+                title={relationshipMetricExplanation("left")}
+                className="relationship-metric-card"
+              >
+                <strong>{relationship.left_ahead}</strong>
+                <span>left-only commits</span>
+                <em>{relationshipMetricExplanation("left")}</em>
               </div>
-              <div><strong>{relationship.working_changes}</strong><span>working changes</span></div>
+
+              <div
+                title={relationshipMetricExplanation("right")}
+                className="relationship-metric-card"
+              >
+                <strong>{relationship.right_ahead}</strong>
+                <span>right-only commits</span>
+                <em>{relationshipMetricExplanation("right")}</em>
+              </div>
+
+              <div
+                title={relationshipMetricExplanation("shared")}
+                className={
+                  relationship.shared_touched_files.length
+                    ? "relationship-metric-card relationship-metric--warning"
+                    : "relationship-metric-card"
+                }
+              >
+                <strong>{relationship.shared_touched_files.length}</strong>
+                <span>shared touched paths</span>
+                <em>{relationshipMetricExplanation("shared")}</em>
+              </div>
+
+              <div
+                title={relationshipMetricExplanation("working")}
+                className="relationship-metric-card"
+              >
+                <strong>{relationship.working_changes}</strong>
+                <span>working changes</span>
+                <em>{relationshipMetricExplanation("working")}</em>
+              </div>
             </div>
+
+            <section className="relationship-beginner-box">
+              <strong>What this means in practice</strong>
+              <span>{relationshipBeginnerSummary(relationship)}</span>
+            </section>
 
             <section className={relationship.shared_touched_files.length ? "relationship-interpretation relationship-interpretation--warning" : "relationship-interpretation"}>
               <strong>Recommended interpretation</strong>

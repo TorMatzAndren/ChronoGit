@@ -3592,3 +3592,42 @@ code {
     grid-template-columns: 1fr;
   }
 }
+
+
+/* CHRONOGIT_BRANCH_BEGINNER_GUIDANCE_V1 */
+.relationship-metric-card {
+  display: grid;
+  gap: 4px;
+}
+
+.relationship-metric-card em {
+  color: #8fa6b8;
+  font-size: 0.66rem;
+  font-style: normal;
+  line-height: 1.3;
+}
+
+.relationship-beginner-box {
+  display: grid;
+  gap: 6px;
+  padding: 11px 12px;
+  border: 1px solid rgba(96, 165, 250, 0.35);
+  border-radius: 11px;
+  background:
+    linear-gradient(
+      180deg,
+      rgba(40, 80, 120, 0.16),
+      rgba(10, 20, 32, 0.42)
+    );
+}
+
+.relationship-beginner-box strong {
+  color: #dff4ff;
+  font-size: 0.82rem;
+}
+
+.relationship-beginner-box span {
+  color: #b8cad8;
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
